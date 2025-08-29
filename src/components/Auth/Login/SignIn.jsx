@@ -8,7 +8,7 @@ const SignIn = () => {
 
                 <input type='password' placeholder='Password' />
                 
-                <button type='submit'>Sign In</button>
+                <button type='submit' className='bg-neutral-400'>Sign In</button>
             </form>
         </div>
     );

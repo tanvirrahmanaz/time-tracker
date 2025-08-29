@@ -1,1 +1,43 @@
 @import "tailwindcss";
+
+@theme {
+  /* ===== Font & Breakpoint ===== */
+  --font-display: "Inter", "sans-serif";
+  --breakpoint-3xl: 120rem;
+
+  /* ===== Primary (Blue, mid-dark) ===== */
+  --color-primary-100: oklch(0.95 0.05 255);
+  --color-primary-200: oklch(0.88 0.08 255);
+  --color-primary-300: oklch(0.80 0.12 255);
+  --color-primary-400: oklch(0.70 0.15 255);
+  --color-primary-500: oklch(0.60 0.18 255);
+  --color-primary-600: oklch(0.50 0.15 255);
+  --color-primary-700: oklch(0.42 0.12 255);
+
+  /* ===== Accent (Teal/Cyan) ===== */
+  --color-accent-100: oklch(0.95 0.05 195);
+  --color-accent-200: oklch(0.90 0.08 195);
+  --color-accent-300: oklch(0.82 0.12 195);
+  --color-accent-400: oklch(0.72 0.15 195);
+  --color-accent-500: oklch(0.62 0.18 195);
+  --color-accent-600: oklch(0.52 0.15 195);
+
+  /* ===== Neutrals (Cool gray) ===== */
+  --color-neutral-50:  oklch(0.98 0 0);
+  --color-neutral-100: oklch(0.95 0.01 250);
+  --color-neutral-200: oklch(0.90 0.01 250);
+  --color-neutral-300: oklch(0.80 0.01 250);
+  --color-neutral-400: oklch(0.70 0.01 250);
+  --color-neutral-500: oklch(0.60 0.01 250);
+  --color-neutral-600: oklch(0.45 0.01 250);
+  --color-neutral-700: oklch(0.30 0.01 250);
+
+  /* ===== Semantic States ===== */
+  --color-success-500: oklch(0.70 0.15 145); /* Jade/Green */
+  --color-warning-500: oklch(0.85 0.18 90);  /* Amber */
+  --color-danger-500:  oklch(0.65 0.20 25);  /* Red */
+
+  /* ===== Motion ===== */
+  --ease-fluid: cubic-bezier(0.3, 0, 0, 1);
+  --ease-snappy: cubic-bezier(0.2, 0, 0, 1);
+}
