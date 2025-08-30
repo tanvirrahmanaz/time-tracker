@@ -9,6 +9,9 @@ const Banner = () => {
             <button className='btn btn-primary border-2 mt-4'>
                 <Link to="/start-tracking">Live Clock</Link>
             </button>
+            <button className='btn btn-primary border-2 mt-4 ml-4'>
+                <Link to="/start-timer">Timer</Link>
+            </button>
             
         </div>
     );

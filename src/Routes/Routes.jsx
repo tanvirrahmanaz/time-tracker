@@ -4,6 +4,7 @@ import SignIn from "../components/Auth/Login/SignIn";
 import SignUp from "../components/Auth/registration/SignUp";
 import HomeLayout from "../components/Home/HomeLayout";
 import Clock from "../components/Clock/Clock";
+import Timer from "../components/Clock/Timer";
 
 const router = createBrowserRouter([
     {
@@ -17,6 +18,10 @@ const router = createBrowserRouter([
             {
                 path: '/start-tracking',
                 element: <Clock></Clock>
+            },
+            {
+                path: '/start-timer',
+                element: <Timer></Timer>
             },
             {
                 path: 'sign-in',
