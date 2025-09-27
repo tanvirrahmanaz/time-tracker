@@ -14,13 +14,11 @@ const Clock = () => {
     const isNight = hours >= 19 || hours < 6;
 
     return (
-        <div className='bg-accent-300'>
-            <h2>Current Time</h2>
-
-            <h1 className='font-bold text-5xl text-red-500 text-center'>{time.toLocaleTimeString()}</h1>
-            
-            <h1 className='font-semibold text-2xl text-red-400 text-center'>{isNight ? "Good Night" : "Good Day"}</h1>
-            <p>{time.toLocaleDateString()}</p>
+        <div className='card text-center'>
+            <h2 className='text-neutral-300 mb-2'>Current Time</h2>
+            <h1 className='font-bold text-5xl text-white'>{time.toLocaleTimeString()}</h1>
+            <h1 className='font-semibold text-2xl text-neutral-300 mt-2'>{isNight ? "Good Night" : "Good Day"}</h1>
+            <p className='text-neutral-400 mt-1'>{time.toLocaleDateString()}</p>
         </div>
     );
 };

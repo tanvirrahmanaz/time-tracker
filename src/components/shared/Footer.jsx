@@ -2,9 +2,9 @@ import React from 'react';
 
 const Footer = () => {
     return (
-        <div className='bg-neutral-200 p-4 mt-8 text-center'>
-            <footer>
-                <p>&copy; 2023 My Website</p>
+        <div className='mt-10 border-t border-[#121212]'>
+            <footer className='container py-6 text-center'>
+                <p className='text-neutral-500'>&copy; {new Date().getFullYear()} Time Tracker</p>
             </footer>
         </div>
     );

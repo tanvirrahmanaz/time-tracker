@@ -22,21 +22,21 @@ const Timer = () => {
 
 
     return (
-        <div>
-      <h1>{time} sec</h1>
-
-      {!isRunning && time > 0 && (
-        <button onClick={() => setIsRunning(true)}>Start</button>
-      )}
-
-      {isRunning && (
-        <button onClick={() => setIsRunning(false)}>Pause</button>
-      )}
-
-      <button onClick={() => { setIsRunning(false); setTime(10); }}>
-        Reset
-      </button>
-    </div>
+        <div className='card text-center'>
+            <h2 className='text-neutral-300 mb-3'>Countdown Timer</h2>
+            <h1 className='font-mono text-5xl text-white mb-4'>{time} sec</h1>
+            <div className='flex items-center justify-center gap-2'>
+                {!isRunning && time > 0 && (
+                    <button className='btn btn-primary' onClick={() => setIsRunning(true)}>Start</button>
+                )}
+                {isRunning && (
+                    <button className='btn btn-outline' onClick={() => setIsRunning(false)}>Pause</button>
+                )}
+                <button className='btn btn-outline' onClick={() => { setIsRunning(false); setTime(10); }}>
+                    Reset
+                </button>
+            </div>
+        </div>
     );
 };
 

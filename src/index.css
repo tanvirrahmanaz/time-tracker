@@ -41,3 +41,128 @@
   --ease-fluid: cubic-bezier(0.3, 0, 0, 1);
   --ease-snappy: cubic-bezier(0.2, 0, 0, 1);
 }
+
+/* Runtime dark theme override using CSS custom properties. */
+[data-theme="dark"] {
+  /* Dark Neutral Scale */
+  --color-neutral-50:  oklch(0.14 0.01 250);
+  --color-neutral-100: oklch(0.18 0.01 250);
+  --color-neutral-200: oklch(0.23 0.01 250);
+  --color-neutral-300: oklch(0.28 0.01 250);
+  --color-neutral-400: oklch(0.34 0.01 250);
+  --color-neutral-500: oklch(0.45 0.01 250);
+  --color-neutral-600: oklch(0.60 0.01 250);
+  --color-neutral-700: oklch(0.80 0.01 250);
+
+  /* Primary tweaks for dark */
+  --color-primary-100: oklch(0.20 0.06 255);
+  --color-primary-200: oklch(0.26 0.08 255);
+  --color-primary-300: oklch(0.34 0.10 255);
+  --color-primary-400: oklch(0.44 0.12 255);
+  --color-primary-500: oklch(0.58 0.16 255);
+  --color-primary-600: oklch(0.70 0.15 255);
+  --color-primary-700: oklch(0.82 0.12 255);
+
+  /* Accent tweaks for dark */
+  --color-accent-100: oklch(0.20 0.05 195);
+  --color-accent-200: oklch(0.26 0.07 195);
+  --color-accent-300: oklch(0.34 0.10 195);
+  --color-accent-400: oklch(0.44 0.12 195);
+  --color-accent-500: oklch(0.58 0.16 195);
+  --color-accent-600: oklch(0.70 0.12 195);
+}
+
+/* Base page background/text that follow theme */
+html, body, #root {
+  min-height: 100%;
+}
+body {
+  background: var(--color-neutral-50);
+  color: #1a1a1a;
+}
+[data-theme="dark"] body {
+  background: #000;
+  color: #e6e6e6;
+}
+
+/* Minimal component primitives for consistent dark UI */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+  transition: transform 120ms var(--ease-snappy), opacity 120ms var(--ease-snappy), background 120ms var(--ease-snappy);
+}
+.btn:active { transform: scale(0.98); }
+.btn-primary {
+  background: var(--color-accent-400);
+  color: #001016;
+}
+[data-theme="dark"] .btn-primary {
+  background: var(--color-accent-500);
+  color: #001016;
+}
+.btn-outline {
+  border: 1.5px solid var(--color-neutral-300);
+  background: transparent;
+  color: inherit;
+}
+[data-theme="dark"] .btn-outline { border-color: var(--color-neutral-400); }
+.btn-ghost {
+  background: transparent;
+  color: inherit;
+}
+.btn:hover { opacity: 0.9; }
+
+.card {
+  background: #ffffff;
+  border: 1px solid #eaeaea;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+[data-theme="dark"] .card { background: #0a0a0a; border-color: #1a1a1a; }
+
+.input, .textarea {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #dcdcdc;
+  color: #111111;
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.8rem;
+}
+[data-theme="dark"] .input, [data-theme="dark"] .textarea { background: #0b0b0b; border-color: #1f1f1f; color: #e6e6e6; }
+.label { font-size: 0.85rem; color: #555; margin-bottom: 0.25rem; display: block; }
+[data-theme="dark"] .label { color: #bdbdbd; }
+
+.container { max-width: 1120px; margin-left: auto; margin-right: auto; padding-left: 1rem; padding-right: 1rem; }
+
+/* Navbar */
+.navbar {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(255,255,255,0.9);
+  backdrop-filter: saturate(1.2) blur(8px);
+  border-bottom: 1px solid #eaeaea;
+}
+[data-theme="dark"] .navbar { background: rgba(0,0,0,0.9); border-bottom-color: #121212; }
+.nav-link { color: #333; }
+[data-theme="dark"] .nav-link { color: #d6d6d6; }
+.nav-link:hover { color: var(--color-primary-600); }
+[data-theme="dark"] .nav-link:hover { color: white; }
+
+/* Headings */
+h1, h2, h3 { color: #151515; }
+p { color: #333; }
+[data-theme="dark"] h1, [data-theme="dark"] h2, [data-theme="dark"] h3 { color: #f1f1f1; }
+[data-theme="dark"] p { color: #c9c9c9; }
+
+/* Fullscreen tweaks */
+:fullscreen {
+  background: #000;
+}
+:fullscreen .fs-time {
+  font-size: clamp(3rem, 12vw, 10rem);
+  line-height: 1.1;
+}

@@ -6,9 +6,11 @@ import Footer from '../components/shared/Footer';
 const MainLayout = () => {
     return (
         <div>
-            <Navbar></Navbar>
-            <Outlet></Outlet>
-            <Footer></Footer>
+            <Navbar />
+            <main className='container py-8'>
+                <Outlet />
+            </main>
+            <Footer />
         </div>
     );
 };

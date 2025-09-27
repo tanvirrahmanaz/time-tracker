@@ -1,26 +1,44 @@
 import React from 'react';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
+import { useTheme } from '../../contexts/ThemeContext.jsx';
+import { useAuth } from '../../contexts/AuthContext.jsx';
 
 const Navbar = () => {
-    return (
-        <div className='bg-neutral-200 p-4 mb-8'>
-            <nav>
-                <ul className='flex space-x-4 justify-center'>
-                    <button className='btn btn-primary border-2'>
-                        <Link to="/">Home</Link>
-                    </button>
-                    <li>About</li>
-                    <li>Contact</li>
-                    <button className='btn btn-primary border-2'>
-                        <Link to="/sign-in">Sign In</Link>
-                    </button>
-                    <button className='btn btn-primary border-2'>
-                        <Link to="/sign-up">Sign Up</Link>
-                    </button>
-                </ul>
-            </nav>
+  const { theme, toggle } = useTheme();
+  const { user, signOut } = useAuth();
+  return (
+    <div className='navbar'>
+      <nav className='container py-3 flex items-center justify-between'>
+        <div className='flex items-center gap-6'>
+          <Link to='/' className='text-white font-semibold text-lg'>Time Tracker</Link>
+          <div className='hidden sm:flex items-center gap-2'>
+            <Link className='nav-link' to='/'>Home</Link>
+            <Link className='nav-link' to='/projects'>Projects</Link>
+            <Link className='nav-link' to='/start-timer'>Timer</Link>
+            <Link className='nav-link' to='/start-tracking'>Clock</Link>
+            <Link className='nav-link' to='/spend'>Spend</Link>
+          </div>
         </div>
-    );
+        <div className='flex items-center gap-2'>
+          {!user && (
+            <>
+              <Link className='btn btn-outline' to='/sign-in'>Sign In</Link>
+              <Link className='btn btn-primary' to='/sign-up'>Sign Up</Link>
+            </>
+          )}
+          {user && (
+            <>
+              <span className='text-neutral-300 text-sm hidden sm:inline'>Hi, {user.displayName || user.email}</span>
+              <button className='btn btn-outline' onClick={signOut}>Sign Out</button>
+            </>
+          )}
+          <button className='btn btn-ghost' onClick={toggle} aria-label='Toggle theme'>
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+        </div>
+      </nav>
+    </div>
+  );
 };
 
 export default Navbar;
