@@ -12,7 +12,7 @@ const fallback = 'http://localhost:5174';
 export const getBaseUrl = () => {
   if (baseOverride) return baseOverride;
   // Vite env if provided
-  const envUrl = (typeof import !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || null;
+  const envUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || null;
   if (envUrl) return envUrl;
   if (typeof window !== 'undefined') {
     const win = window;

@@ -8,6 +8,7 @@ import Timer from "../components/Clock/Timer";
 import Projects from "../components/Projects/Projects";
 import ProjectDetail from "../components/Projects/ProjectDetail";
 import Spend from "../components/Spend/Spend";
+import ProtectedRoute from "../components/Auth/ProtectedRoute";
 
 const router = createBrowserRouter([
     {
@@ -28,15 +29,27 @@ const router = createBrowserRouter([
             },
             {
                 path: '/projects',
-                element: <Projects />
+                element: (
+                    <ProtectedRoute>
+                        <Projects />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/projects/:id',
-                element: <ProjectDetail />
+                element: (
+                    <ProtectedRoute>
+                        <ProjectDetail />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/spend',
-                element: <Spend />,
+                element: (
+                    <ProtectedRoute>
+                        <Spend />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: 'sign-in',

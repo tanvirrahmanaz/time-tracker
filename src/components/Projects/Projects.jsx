@@ -27,52 +27,65 @@ const Projects = () => {
   };
 
   return (
-    <div className='max-w-4xl mx-auto p-4'>
-      <h1 className='text-2xl font-semibold mb-4'>Projects</h1>
+    <div className='mx-auto flex w-full max-w-5xl flex-col gap-8 rounded-3xl bg-black px-4 pb-16 pt-8 text-white shadow-2xl sm:px-6'>
+      <header className='space-y-3 text-center sm:text-left'>
+        <p className='text-xs uppercase tracking-[0.2em] text-white/50'>Manage</p>
+        <h1 className='text-3xl font-semibold sm:text-[2.3rem]'>Projects</h1>
+        <p className='text-sm text-white/60'>Create new initiatives, open timers, and track daily totals from a single place.</p>
+      </header>
 
-      <form onSubmit={handleAdd} className='card mb-6 space-y-3'>
-        <div>
-          <label className='label'>Project name</label>
-          <input
-            className='input'
-            placeholder='e.g. Client Website Redesign'
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
+      <form onSubmit={handleAdd} className='flex flex-col gap-5 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-950 via-black to-slate-900 p-6 shadow-[0_20px_50px_rgba(0,0,0,0.45)] backdrop-blur'>
+        <div className='grid gap-4 lg:grid-cols-2'>
+          <label className='flex flex-col gap-2 text-sm text-white/70'>
+            <span className='text-xs uppercase tracking-[0.18em] text-white/50'>Project name</span>
+            <input
+              className='rounded-xl border border-white/10 bg-black/60 px-4 py-3 text-base text-white placeholder:text-white/40 focus:border-white/30 focus:outline-none'
+              placeholder='e.g. Client Website Redesign'
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <label className='flex flex-col gap-2 text-sm text-white/70'>
+            <span className='text-xs uppercase tracking-[0.18em] text-white/50'>Description (optional)</span>
+            <textarea
+              className='min-h-[100px] rounded-xl border border-white/10 bg-black/60 px-4 py-3 text-white placeholder:text-white/40 focus:border-white/30 focus:outline-none'
+              rows={3}
+              placeholder="What are you tracking? (e.g. client work, personal goal)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </label>
         </div>
-        <div>
-          <label className='label'>Description (optional)</label>
-          <textarea
-            className='textarea'
-            rows={2}
-            placeholder='Short note'
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
+        <div className='flex flex-wrap items-center justify-end gap-3'>
+          <span className='text-xs uppercase tracking-[0.18em] text-white/40'>Projects auto-sync locally</span>
+          <button className='tt-button tt-button-primary min-w-[160px]' type='submit'>Create project</button>
         </div>
-        <button className='btn btn-primary' type='submit'>Add Project</button>
       </form>
 
-      <div className='space-y-3'>
+      <section className='space-y-4'>
         {projects.length === 0 && (
-          <p className='text-neutral-500'>No projects yet. Add one above.</p>
+          <p className='rounded-2xl border border-dashed border-white/15 bg-black/40 px-4 py-6 text-center text-sm text-white/60'>
+            No projects yet. Create your first one above.
+          </p>
         )}
         {projects.map(p => (
-          <div key={p.id} className='card flex items-center justify-between'>
-            <div>
-              <Link to={`/projects/${p.id}`} className='text-primary-600 font-medium hover:underline'>
+          <article key={p.id} className='flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/70 p-5 shadow-lg hover:border-white/20 transition-colors sm:flex-row sm:items-center sm:justify-between'>
+            <div className='space-y-1'>
+              <Link to={`/projects/${p.id}`} className='text-lg font-semibold text-white hover:text-white/80'>
                 {p.name}
               </Link>
-              {p.description && <p className='text-sm text-neutral-400'>{p.description}</p>}
+              {p.description && <p className='text-sm text-white/50'>{p.description}</p>}
             </div>
-            <div className='flex items-center gap-3'>
-              <span className='text-neutral-300 font-mono'>{formatDuration(p.totalMs || 0)}</span>
-              <Link className='btn btn-primary' to={`/projects/${p.id}`}>Open</Link>
-              <button className='nav-link' onClick={() => handleDelete(p.id)}>Delete</button>
+            <div className='flex flex-wrap items-center gap-3 text-sm font-medium text-white/70'>
+              <span className='rounded-full border border-white/10 bg-white/5 px-3 py-1 font-mono text-base text-white'>
+                {formatDuration(p.totalMs || 0)}
+              </span>
+              <Link className='tt-button tt-button-primary' to={`/projects/${p.id}`}>Open</Link>
+              <button className='tt-button tt-button-outline' onClick={() => handleDelete(p.id)}>Delete</button>
             </div>
-          </div>
+          </article>
         ))}
-      </div>
+      </section>
     </div>
   );
 };
