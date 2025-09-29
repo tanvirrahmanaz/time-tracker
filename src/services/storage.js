@@ -33,36 +33,88 @@ export function getProjects() {
 }
 
 export function getProjectById(id) {
-  return load().find(p => p.id === id) || null;
+  return load().find(p => p.id === id || p.remoteId === id) || null;
 }
 
-import { createProject as apiCreateProject, postSession as apiPostSession } from './serverApi';
+import {
+  createProject as apiCreateProject,
+  postSession as apiPostSession,
+  getProjects as apiGetProjects,
+  deleteProjectRemote,
+  patchProjectRemote,
+  getApiUser,
+} from './serverApi';
 
-export function addProject({ name, description = '' }) {
-  const projects = load();
+function normalizeRemoteProject(doc) {
+  if (!doc) return null;
+  const id = doc.id || doc._id || doc.remoteId;
+  return {
+    id: String(id || crypto.randomUUID()),
+    remoteId: id ? String(id) : null,
+    name: doc.name || '',
+    description: doc.description || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    totalMs: doc.totalMs || 0,
+    sessions: Array.isArray(doc.sessions) ? doc.sessions : [],
+  };
+}
+
+export async function syncProjectsFromServer() {
+  if (!getApiUser()) return load();
+  try {
+    const remote = await apiGetProjects();
+    if (!Array.isArray(remote)) return load();
+    const normalized = remote
+      .map(normalizeRemoteProject)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    save(normalized);
+    return normalized;
+  } catch (e) {
+    console.warn('syncProjectsFromServer failed', e);
+    return load();
+  }
+}
+
+export async function addProject({ name, description = '' }) {
+  const owner = getApiUser();
+  if (owner) {
+    try {
+      const remote = await apiCreateProject({ name, description });
+      const normalized = normalizeRemoteProject(remote);
+      if (normalized) {
+        const current = load().filter(p => p.id !== normalized.id && p.remoteId !== normalized.id);
+        save([normalized, ...current]);
+        return normalized;
+      }
+    } catch (err) {
+      console.warn('createProject remote failed', err);
+    }
+  }
+  const current = load();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const project = { id, name, description, createdAt: now, totalMs: 0, sessions: [], remoteId: null };
-  // Try to create on server as well (best-effort)
-  try {
-    apiCreateProject({ name, description }).then((remote) => {
-      const p = load().find(x => x.id === id);
-      if (!p) return;
-      p.remoteId = remote?._id || null;
-      save(load());
-    }).catch(() => {});
-  } catch {}
-  projects.unshift(project);
-  save(projects);
+  current.unshift(project);
+  save(current);
   return project;
 }
 
 export function updateProject(updated) {
   const projects = load();
-  const idx = projects.findIndex(p => p.id === updated.id);
+  const idx = projects.findIndex(p => p.id === updated.id || p.remoteId === updated.id);
   if (idx === -1) return;
-  projects[idx] = updated;
+  const merged = { ...projects[idx], ...updated };
+  projects[idx] = merged;
   save(projects);
+  const remoteId = merged.remoteId || merged.id;
+  if (remoteId && getApiUser()) {
+    try {
+      patchProjectRemote(remoteId, { name: merged.name, description: merged.description })
+        .then(() => syncProjectsFromServer())
+        .catch(() => {});
+    } catch {}
+  }
 }
 
 export function addSessionToProject(projectId, session) {
@@ -74,9 +126,20 @@ export function addSessionToProject(projectId, session) {
   projects[idx].totalMs = (projects[idx].totalMs || 0) + (session.durationMs || 0);
   save(projects);
   // Mirror to server if project is linked
-  const remoteId = projects[idx].remoteId;
-  if (remoteId) {
-    try { apiPostSession(remoteId, session).catch(() => {}); } catch {}
+  const remoteId = projects[idx].remoteId || projectId;
+  if (remoteId && getApiUser()) {
+    try {
+      apiPostSession(remoteId, session)
+        .then(updated => {
+          const normalized = normalizeRemoteProject(updated);
+          if (!normalized) return;
+          const current = load();
+          const list = current.filter(p => p.id !== normalized.id && p.remoteId !== normalized.id);
+          list.unshift(normalized);
+          save(list);
+        })
+        .catch(() => {});
+    } catch {}
   }
   return log;
 }
@@ -109,16 +172,33 @@ export function bumpDailySession(projectId, type, deltaMs) {
 export function mirrorAggregateToServer(projectId, type, durationMs) {
   if (!durationMs) return;
   const p = load().find(p => p.id === projectId);
-  if (!p || !p.remoteId) return;
+  if (!p || !p.remoteId || !getApiUser()) return;
   const now = new Date();
   const session = { type, start: new Date(now.getTime() - durationMs).toISOString(), end: now.toISOString(), durationMs };
-  try { apiPostSession(p.remoteId, session).catch(() => {}); } catch {}
+  try {
+    if (!getApiUser()) throw new Error('no user');
+    apiPostSession(p.remoteId, session)
+      .then(updated => {
+        const normalized = normalizeRemoteProject(updated);
+        if (!normalized) return;
+        const current = load().filter(x => x.id !== normalized.id && x.remoteId !== normalized.id);
+        save([normalized, ...current]);
+      })
+      .catch(() => {});
+  } catch {}
 }
 
 export function deleteProject(projectId) {
   const projects = load();
-  const next = projects.filter(p => p.id !== projectId);
+  const target = projects.find(p => p.id === projectId || p.remoteId === projectId);
+  const next = projects.filter(p => p !== target);
   save(next);
+  const remoteId = target?.remoteId || target?.id;
+  if (remoteId) {
+    try {
+      deleteProjectRemote(remoteId).then(() => syncProjectsFromServer()).catch(() => {});
+    } catch {}
+  }
 }
 
 export function clearAll() {

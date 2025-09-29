@@ -1,30 +1,76 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { addProject, getProjects, formatDuration, deleteProject } from '../../services/storage';
+import { addProject, getProjects, formatDuration, deleteProject, syncProjectsFromServer } from '../../services/storage';
+import { useAuth } from '../../contexts/AuthContext.jsx';
 
 const Projects = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [tick, setTick] = useState(0); // simple rerender trigger after changes
+  const [tick, setTick] = useState(0);
+  const [projects, setProjects] = useState(() => getProjects());
+  const [syncing, setSyncing] = useState(false);
+  const { user } = useAuth();
 
-  const projects = useMemo(() => getProjects(), [tick]);
+  useEffect(() => {
+    setProjects(getProjects());
+  }, [tick, user]);
 
-  const handleAdd = (e) => {
+  useEffect(() => {
+    let active = true;
+    if (!user) {
+      setProjects([]);
+      return undefined;
+    }
+    setSyncing(true);
+    syncProjectsFromServer()
+      .then((list) => {
+        if (active) setProjects(list);
+      })
+      .finally(() => { if (active) setSyncing(false); });
+    return () => { active = false; };
+  }, [user]);
+
+  const handleAdd = async (e) => {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return;
-    addProject({ name: trimmed, description: description.trim() });
+    await addProject({ name: trimmed, description: description.trim() });
     setName('');
     setDescription('');
     setTick(t => t + 1);
+    if (user) {
+      syncProjectsFromServer().then((list) => setProjects(list)).catch(() => {});
+    }
   };
 
   const handleDelete = (id) => {
     if (confirm('Delete this project?')) {
       deleteProject(id);
       setTick(t => t + 1);
+      if (user) {
+        syncProjectsFromServer().then((list) => setProjects(list)).catch(() => {});
+      }
     }
   };
+
+  const dedupedProjects = useMemo(() => {
+    const map = new Map();
+    for (const project of projects) {
+      if (!project) continue;
+      const key = project.remoteId || project.id;
+      if (!key) continue;
+      if (!map.has(key)) {
+        map.set(key, {
+          ...project,
+          id: key,
+          remoteId: key,
+          totalMs: project.totalMs || 0,
+          sessions: Array.isArray(project.sessions) ? project.sessions : [],
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [projects]);
 
   return (
     <div className='mx-auto flex w-full max-w-5xl flex-col gap-8 rounded-3xl bg-black px-4 pb-16 pt-8 text-white shadow-2xl sm:px-6'>
@@ -63,12 +109,13 @@ const Projects = () => {
       </form>
 
       <section className='space-y-4'>
-        {projects.length === 0 && (
+        {!syncing && dedupedProjects.length === 0 && (
           <p className='rounded-2xl border border-dashed border-white/15 bg-black/40 px-4 py-6 text-center text-sm text-white/60'>
             No projects yet. Create your first one above.
           </p>
         )}
-        {projects.map(p => (
+        {syncing && <p className='text-xs uppercase tracking-[0.18em] text-white/40'>Syncing with cloud…</p>}
+        {dedupedProjects.map(p => (
           <article key={p.id} className='flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/70 p-5 shadow-lg hover:border-white/20 transition-colors sm:flex-row sm:items-center sm:justify-between'>
             <div className='space-y-1'>
               <Link to={`/projects/${p.id}`} className='text-lg font-semibold text-white hover:text-white/80'>

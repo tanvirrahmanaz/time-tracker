@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { addSessionToProject, bumpDailySession, mirrorAggregateToServer, formatDuration, getProjectById, updateProject } from '../../services/storage';
-import { createProject as apiCreateProject } from '../../services/serverApi';
+import { addSessionToProject, bumpDailySession, mirrorAggregateToServer, formatDuration, getProjectById, updateProject, syncProjectsFromServer } from '../../services/storage';
 
 function useForceRerender() {
   const [, setTick] = useState(0);
@@ -369,19 +368,26 @@ const ProjectDetail = () => {
   const { id } = useParams();
   const force = useForceRerender();
   const project = useMemo(() => getProjectById(id), [id, force]);
+  const [syncing, setSyncing] = useState(true);
 
   useEffect(() => {
-    // If project has no remoteId yet, try to create it on the server (best-effort)
-    if (project && !project.remoteId) {
-      apiCreateProject({ name: project.name, description: project.description || '' })
-        .then(remote => {
-          const updated = { ...project, remoteId: remote?._id || null };
-          updateProject(updated);
-          force();
-        })
-        .catch(() => {});
-    }
-  }, [project]);
+    // Ensure latest remote copy loaded for this user
+    setSyncing(true);
+    syncProjectsFromServer()
+      .then(() => {
+        force();
+        setSyncing(false);
+      })
+      .catch(() => setSyncing(false));
+  }, [id]);
+
+  if (!project && syncing) {
+    return (
+      <div className='mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-10 text-white sm:px-6'>
+        <p className='text-sm text-white/60'>Loading project…</p>
+      </div>
+    );
+  }
 
   if (!project) {
     return (

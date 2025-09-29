@@ -8,7 +8,18 @@
 let baseOverride = null;
 export function setApiBase(url) { baseOverride = url; }
 
-const fallback = 'http://localhost:5174';
+const localDefault = 'http://localhost:5174';
+const hostedDefault = 'https://time-tracker-server-sable.vercel.app';
+
+const fallback = typeof window !== 'undefined'
+  ? (['127.0.0.1', 'localhost'].includes(window.location.hostname) ? localDefault : hostedDefault)
+  : hostedDefault;
+
+let userOverride = null;
+export function setApiUser(value) {
+  userOverride = value ? String(value).toLowerCase() : null;
+}
+export function getApiUser() { return userOverride; }
 export const getBaseUrl = () => {
   if (baseOverride) return baseOverride;
   // Vite env if provided
@@ -25,7 +36,11 @@ export const getBaseUrl = () => {
 async function http(path, opts = {}) {
   const url = `${getBaseUrl()}${path}`;
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(userOverride ? { 'x-user': userOverride } : {}),
+      ...(opts.headers || {}),
+    },
     ...opts,
   });
   if (!res.ok) {
@@ -34,6 +49,7 @@ async function http(path, opts = {}) {
     const hint = text && text.includes('Cannot') ? `Check API base ${getBaseUrl()} and that the server is running.` : '';
     throw new Error(`API ${res.status} ${res.statusText} at ${url}${hint ? ' — ' + hint : ''}`);
   }
+  if (res.status === 204) return null;
   return res.json();
 }
 
@@ -53,6 +69,14 @@ export async function getProject(id) {
   return http(`/projects/${id}`);
 }
 
+export async function deleteProjectRemote(id) {
+  return http(`/projects/${id}`, { method: 'DELETE' });
+}
+
+export async function patchProjectRemote(id, payload) {
+  return http(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+}
+
 // Spend tracker
 export async function listSpend() {
   try {
@@ -66,4 +90,12 @@ export async function listSpend() {
 
 export async function createSpend(entry) {
   return http('/spend', { method: 'POST', body: JSON.stringify(entry) });
+}
+
+export async function updateSpend(id, payload) {
+  return http(`/spend/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+}
+
+export async function deleteSpend(id) {
+  return http(`/spend/${id}`, { method: 'DELETE' });
 }

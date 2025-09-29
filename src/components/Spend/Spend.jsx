@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { createSpend, listSpend } from '../../services/serverApi';
+import { createSpend, listSpend, updateSpend, deleteSpend } from '../../services/serverApi';
 
 function startOfDay(d = new Date()) {
   const x = new Date(d);
@@ -108,6 +108,34 @@ const Spend = () => {
   const [chartTab, setChartTab] = useState('week');
   const [chartMode, setChartMode] = useState('histogram');
   const [now, setNow] = useState(() => new Date());
+  const [monthlyTodo, setMonthlyTodo] = useState(() => {
+    try {
+      const raw = localStorage.getItem('tt_spend_month_todo');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return {};
+      const allBoolean = Object.values(parsed).every((val) => typeof val === 'boolean');
+      if (allBoolean) {
+        const current = new Date();
+        const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+        return { [key]: parsed };
+      }
+      return parsed;
+    } catch {
+      return {};
+    }
+  });
+  const [showTodoForm, setShowTodoForm] = useState(false);
+  const [todoAmount, setTodoAmount] = useState('');
+  const [todoReason, setTodoReason] = useState('');
+  const [todoWhen, setTodoWhen] = useState(() => getBdInputString());
+  const [todoError, setTodoError] = useState('');
+  const [todoSaving, setTodoSaving] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const current = new Date();
+    return `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   async function refresh() {
     setLoading(true);
@@ -136,6 +164,10 @@ const Spend = () => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('tt_spend_month_todo', JSON.stringify(monthlyTodo)); } catch {}
+  }, [monthlyTodo]);
 
   async function onAdd(e) {
     e.preventDefault();
@@ -349,6 +381,142 @@ const Spend = () => {
 
   const activeSeries = chartTab === 'week' ? weekSeries : monthSeries;
 
+  const monthOptions = useMemo(() => {
+    const set = new Set();
+    entries.forEach((entry) => {
+      const at = entry.at ? new Date(entry.at) : new Date();
+      const key = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}`;
+      set.add(key);
+    });
+    const ordered = Array.from(set).sort((a, b) => b.localeCompare(a));
+    if (!ordered.length) {
+      const current = new Date();
+      ordered.push(`${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`);
+    }
+    return ordered;
+  }, [entries]);
+
+  useEffect(() => {
+    const current = new Date();
+    const currentKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+    if (!monthOptions.includes(selectedMonth)) {
+      setSelectedMonth(currentKey);
+    }
+  }, [monthOptions, selectedMonth]);
+
+  const monthlyExpenses = useMemo(() => {
+    const [yearStr, monthStr] = selectedMonth.split('-');
+    const targetYear = Number(yearStr);
+    const targetMonth = Number(monthStr) - 1;
+    return entries.filter((entry) => {
+      if (entry.type !== 'out') return false;
+      const at = entry.at ? new Date(entry.at) : new Date();
+      return at.getFullYear() === targetYear && at.getMonth() === targetMonth;
+    });
+  }, [entries, selectedMonth]);
+
+  const todoMap = monthlyTodo[selectedMonth] || {};
+
+  useEffect(() => {
+    if (!monthlyExpenses.length) return;
+    setMonthlyTodo((prev) => {
+      const next = { ...prev };
+      const monthKey = selectedMonth;
+      const monthState = { ...(next[monthKey] || {}) };
+      let changed = false;
+      monthlyExpenses.forEach((entry) => {
+        const key = entry._id || entry.id;
+        if (!key) return;
+        const value = !!entry.isCleared;
+        if (!(key in monthState) || monthState[key] !== value) {
+          monthState[key] = value;
+          changed = true;
+        }
+      });
+      if (!changed) return prev;
+      next[monthKey] = monthState;
+      return next;
+    });
+  }, [monthlyExpenses, selectedMonth]);
+
+  const toggleTodo = async (entry) => {
+    const key = entry._id || entry.id;
+    if (!key) return;
+    const nextValue = !todoMap[key];
+    setMonthlyTodo((prev) => {
+      const next = { ...prev };
+      const monthState = { ...(next[selectedMonth] || {}) };
+      monthState[key] = nextValue;
+      next[selectedMonth] = monthState;
+      return next;
+    });
+    try {
+      await updateSpend(entry.id || entry._id, { isCleared: nextValue });
+      refresh();
+    } catch (e) {
+      console.warn('Failed to update spend', e);
+    }
+  };
+
+  const removeMonthlyExpense = async (entry) => {
+    const key = entry._id || entry.id;
+    if (!key) return;
+    if (!confirm('Remove this expense from the month?')) return;
+    try {
+      await deleteSpend(entry.id || entry._id);
+      setMonthlyTodo((prev) => {
+        const next = { ...prev };
+        const monthState = { ...(next[selectedMonth] || {}) };
+        delete monthState[key];
+        next[selectedMonth] = monthState;
+        return next;
+      });
+      refresh();
+    } catch (e) {
+      console.warn('Failed to delete spend', e);
+      setError(e.message || 'Failed to delete');
+    }
+  };
+
+  const onAddTodoExpense = async (e) => {
+    e.preventDefault();
+    setTodoError('');
+    if (!todoAmount || Number(todoAmount) <= 0) {
+      setTodoError('Enter a valid amount');
+      return;
+    }
+    if (!todoReason.trim()) {
+      setTodoError('Add a short note for the expense');
+      return;
+    }
+    if (selectedMonth !== currentMonthKey) {
+      setTodoError('Switch to the current month to add new expenses');
+      return;
+    }
+    try {
+      setTodoSaving(true);
+      await createSpend({
+        type: 'out',
+        amount: Number(todoAmount),
+        place: '',
+        method: '',
+        reason: todoReason.trim(),
+        at: bdInputToIso(todoWhen),
+        category: 'expense',
+        loanParty: '',
+      });
+      setTodoAmount('');
+      setTodoReason('');
+      setTodoWhen(getBdInputString());
+      setShowTodoForm(false);
+      refresh();
+    } catch (err) {
+      setTodoError(err.message || 'Failed to add expense');
+    } finally {
+      setTodoSaving(false);
+    }
+  };
+
   return (
     <div className='container mx-auto px-3 py-6 max-w-5xl'>
       <div className='space-y-6'>
@@ -505,6 +673,94 @@ const Spend = () => {
             </button>
           </form>
         </section>
+
+        {monthlyExpenses.length > 0 && (
+          <section className='card space-y-4 p-4 sm:p-6'>
+            <header className='flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between'>
+              <div>
+                <h2 className='text-lg font-semibold'>This Month&apos;s Expenses</h2>
+                <p className='text-sm text-neutral-400'>Checklist for {formatBdDate(now, { month: 'long', year: 'numeric' })} outgoing payments.</p>
+              </div>
+              <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Total: {monthlyExpenses.length}</span>
+            </header>
+            <div className='flex flex-wrap items-center justify-between gap-3'>
+              <button className='tt-button tt-button-outline' onClick={() => setShowTodoForm((v) => !v)}>
+                {showTodoForm ? 'Close' : 'Add monthly expense'}
+              </button>
+              <span className='text-xs text-neutral-400'>{Object.values(monthlyTodo).filter(Boolean).length} cleared</span>
+            </div>
+            {showTodoForm && (
+              <form className='rounded-lg border border-neutral-200/50 bg-white/80 p-3 text-sm shadow-sm dark:border-neutral-800/60 dark:bg-neutral-900/40' onSubmit={onAddTodoExpense}>
+                <div className='grid gap-3 sm:grid-cols-3'>
+                  <label className='flex flex-col gap-1'>
+                    <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Amount</span>
+                    <input
+                      className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+                      type='number'
+                      min='0'
+                      step='0.01'
+                      value={todoAmount}
+                      onChange={(e) => setTodoAmount(e.target.value)}
+                    />
+                  </label>
+                  <label className='flex flex-col gap-1 sm:col-span-2'>
+                    <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Note</span>
+                    <input
+                      className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+                      value={todoReason}
+                      onChange={(e) => setTodoReason(e.target.value)}
+                      placeholder='e.g., Internet bill, Tuition'
+                    />
+                  </label>
+                </div>
+                <div className='mt-3 flex flex-wrap items-end gap-3'>
+                  <label className='flex flex-col gap-1'>
+                    <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Date</span>
+                    <input
+                      className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+                      type='datetime-local'
+                      value={todoWhen}
+                      onChange={(e) => setTodoWhen(e.target.value)}
+                    />
+                  </label>
+                  <button className='tt-button tt-button-primary' type='submit' disabled={todoSaving}>
+                    {todoSaving ? 'Saving…' : 'Save expense'}
+                  </button>
+                </div>
+                {todoError && <p className='mt-2 text-sm text-danger-400'>{todoError}</p>}
+              </form>
+            )}
+            <ul className='space-y-2'>
+              {monthlyExpenses.map((entry) => {
+                const key = entry._id || entry.id;
+                const checked = monthlyTodo[key] || entry.isCleared || false;
+                return (
+                  <li key={key} className='flex items-start gap-3 rounded-lg border border-neutral-200/40 bg-white/80 px-3 py-2 text-sm text-neutral-700 dark:border-neutral-800/60 dark:bg-neutral-900/40 dark:text-neutral-200'>
+                    <input
+                      type='checkbox'
+                      className='mt-1 h-4 w-4 cursor-pointer'
+                      checked={checked}
+                      onChange={() => toggleTodo(entry)}
+                    />
+                    <div className='flex-1'>
+                      <p className='font-medium'>{entry.reason || entry.place || 'Expense'}</p>
+                      <p className='text-xs text-neutral-500 dark:text-neutral-400'>
+                        {formatMoney(entry.amount)} • {formatBdDate(new Date(entry.at || Date.now()))}
+                      </p>
+                    </div>
+                    <button
+                      type='button'
+                      className='tt-button tt-button-outline text-xs'
+                      onClick={() => removeMonthlyExpense(entry)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
         <details className='card space-y-4 p-4 sm:p-6'>
           <summary className='nav-link cursor-pointer text-base font-semibold'>Loan tracker</summary>

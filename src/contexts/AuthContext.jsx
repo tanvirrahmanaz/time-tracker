@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { auth, googleProvider } from '../services/firebaseClient';
+import { setApiUser } from '../services/serverApi';
+import { clearAll, syncProjectsFromServer } from '../services/storage';
 import {
   onAuthStateChanged,
   signOut as fbSignOut,
@@ -25,6 +27,12 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
+      setApiUser(u?.email || '');
+      if (u?.email) {
+        syncProjectsFromServer().catch(() => {});
+      } else {
+        clearAll();
+      }
       setLoading(false);
     });
     return () => unsub();
@@ -48,6 +56,8 @@ export function AuthProvider({ children }) {
     },
     signOut: async () => {
       await fbSignOut(auth);
+      setApiUser('');
+      clearAll();
     },
   }), [user, loading]);
 
@@ -61,4 +71,3 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
-
