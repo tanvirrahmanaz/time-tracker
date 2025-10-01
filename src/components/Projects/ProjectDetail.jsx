@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Swal from 'sweetalert2';
 import { Link, useParams } from 'react-router-dom';
 import { addSessionToProject, bumpDailySession, mirrorAggregateToServer, formatDuration, getProjectById, updateProject, syncProjectsFromServer } from '../../services/storage';
 
@@ -8,6 +9,44 @@ function useForceRerender() {
 }
 
 const colorPresets = ['#38bdf8', '#facc15', '#f97316', '#22c55e', '#a855f7', '#f472b6', '#ffffff'];
+
+const META_KEY = 'tt_project_meta_v1';
+
+function loadMeta() {
+  try {
+    const raw = localStorage.getItem(META_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveMeta(meta) {
+  try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch {}
+}
+
+function getProjectMeta(projectId) {
+  const meta = loadMeta();
+  return meta[projectId] || { notes: [] };
+}
+
+function updateProjectMeta(projectId, updater) {
+  const all = loadMeta();
+  const previous = all[projectId] || { notes: [] };
+  const next = updater(previous) || { notes: [] };
+  all[projectId] = next;
+  saveMeta(all);
+  return next;
+}
+
+function formatDateHuman(value) {
+  if (!value) return 'Unknown date';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+}
 
 const Stopwatch = ({ projectId, onSaved, active = true, fullscreen = false, color = '#ffffff' }) => {
   const [running, setRunning] = useState(false);
@@ -407,6 +446,144 @@ const ProjectDetail = () => {
     }
   };
 
+  // Short note — store in description for simplicity
+  const [shortNote, setShortNote] = useState(project.description || '');
+  useEffect(() => setShortNote(project.description || ''), [project.description]);
+  const saveShortNote = (e) => {
+    e?.preventDefault?.();
+    updateProject({ ...project, description: (shortNote || '').trim() });
+    force();
+    Swal.fire({ icon: 'success', title: 'Saved', text: 'Short note updated.' });
+  };
+
+  const [dailyNotes, setDailyNotes] = useState([]);
+  const [todos, setTodos] = useState(() => (project && Array.isArray(project.todos) ? project.todos : []));
+  const [noteDate, setNoteDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [noteText, setNoteText] = useState('');
+  const [todoTitle, setTodoTitle] = useState('');
+
+  useEffect(() => {
+    if (!project?.id) return;
+    const meta = getProjectMeta(project.id);
+    setDailyNotes(Array.isArray(meta.notes) ? meta.notes : []);
+  }, [project?.id]);
+
+  const persistNotes = useCallback((updater) => {
+    if (!project?.id) return;
+    const next = updateProjectMeta(project.id, updater);
+    setDailyNotes(Array.isArray(next.notes) ? next.notes : []);
+  }, [project?.id]);
+
+  const normalizeTodos = useCallback((list) => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const title = typeof item.title === 'string' ? item.title.trim() : '';
+        if (!title) return null;
+        return {
+          id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : crypto.randomUUID(),
+          title,
+          done: Boolean(item.done),
+          createdAt: item.createdAt && !Number.isNaN(new Date(item.createdAt).getTime())
+            ? new Date(item.createdAt).toISOString()
+            : new Date().toISOString(),
+        };
+      })
+      .filter(Boolean);
+  }, []);
+
+  const saveTodos = useCallback((updater) => {
+    if (!project?.id) return;
+    setTodos((prev) => {
+      const base = Array.isArray(prev) ? prev : [];
+      const nextList = typeof updater === 'function' ? updater(base) : updater;
+      const normalized = normalizeTodos(nextList);
+      updateProject({ id: project.id, todos: normalized });
+      force();
+      return normalized;
+    });
+  }, [project?.id, normalizeTodos, force]);
+
+  const projectTodos = project?.todos;
+
+  useEffect(() => {
+    setTodos(normalizeTodos(projectTodos || []));
+  }, [projectTodos, normalizeTodos]);
+
+  const addDailyNote = useCallback((event) => {
+    event?.preventDefault?.();
+    if (!noteText.trim()) return;
+    const entry = {
+      id: crypto.randomUUID(),
+      date: noteDate,
+      text: noteText.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    persistNotes((prev) => ({
+      ...prev,
+      notes: [entry, ...(Array.isArray(prev.notes) ? prev.notes : [])],
+    }));
+    setNoteText('');
+    Swal.fire({ icon: 'success', title: 'Note saved', timer: 1200, showConfirmButton: false });
+  }, [noteDate, noteText, persistNotes]);
+
+  const removeDailyNote = useCallback((id) => {
+    persistNotes((prev) => ({
+      ...prev,
+      notes: (prev.notes || []).filter((note) => note.id !== id),
+    }));
+  }, [persistNotes]);
+
+  const addTodo = useCallback((event) => {
+    event?.preventDefault?.();
+    if (!todoTitle.trim()) return;
+    const task = {
+      id: crypto.randomUUID(),
+      title: todoTitle.trim(),
+      done: false,
+      createdAt: new Date().toISOString(),
+    };
+    saveTodos((prev) => [task, ...(Array.isArray(prev) ? prev : [])]);
+    setTodoTitle('');
+    Swal.fire({ icon: 'success', title: 'Task added', timer: 1000, showConfirmButton: false });
+  }, [todoTitle, saveTodos]);
+
+  const toggleTodoItem = useCallback((task) => {
+    saveTodos((prev) => (Array.isArray(prev)
+      ? prev.map((item) => (item.id === task.id ? { ...item, done: !item.done } : item))
+      : prev));
+  }, [saveTodos]);
+
+  const removeTodoItem = useCallback((task) => {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Remove this task?',
+      showCancelButton: true,
+      confirmButtonColor: '#dc2626',
+      confirmButtonText: 'Remove',
+      cancelButtonText: 'Cancel',
+    }).then((result) => {
+      if (!result.isConfirmed) return;
+      saveTodos((prev) => (Array.isArray(prev) ? prev.filter((item) => item.id !== task.id) : prev));
+      Swal.fire({ icon: 'success', title: 'Task removed', timer: 900, showConfirmButton: false });
+    });
+  }, [saveTodos]);
+
+  const notesByDate = useMemo(() => {
+    const groups = new Map();
+    (dailyNotes || []).forEach((note) => {
+      const key = note.date || note.createdAt || 'unknown';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(note);
+    });
+    return Array.from(groups.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [dailyNotes]);
+
+  const totalTodos = todos.length;
+  const completedTodos = todos.filter((t) => t.done).length;
+  const trackerPercent = totalTodos === 0 ? 0 : Math.round((completedTodos / totalTodos) * 100);
+
   const [mode, setMode] = useState('countdown'); // 'stopwatch' | 'countdown' | 'pomodoro'
   const [timeColor, setTimeColor] = useState('#38bdf8');
 
@@ -447,7 +624,20 @@ const ProjectDetail = () => {
         </div>
       </div>
 
-      <div className='grid gap-5 md:grid-cols-[minmax(0,260px)_1fr]'>
+      <form onSubmit={saveShortNote} className='rounded-2xl border border-white/10 bg-black/70 p-5 shadow-lg backdrop-blur'>
+        <label className='text-xs uppercase tracking-[0.18em] text-white/50 mb-2 block'>Short note</label>
+        <input
+          className='w-full rounded-xl border border-white/10 bg-black/60 px-4 py-3 text-white placeholder:text-white/40 focus:border-white/30 focus:outline-none'
+          placeholder='Add a short note about this project'
+          value={shortNote}
+          onChange={(e) => setShortNote(e.target.value)}
+        />
+        <div className='mt-3 flex justify-end'>
+          <button type='submit' className='tt-button tt-button-outline'>Save note</button>
+        </div>
+      </form>
+
+    <div className='grid gap-5 md:grid-cols-[minmax(0,260px)_1fr]'>
         <aside className='flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/70 p-4 shadow-lg backdrop-blur'>
           <p className='text-xs uppercase tracking-[0.18em] text-white/50'>Modes</p>
           <div className='flex flex-col gap-2'>
@@ -525,6 +715,140 @@ const ProjectDetail = () => {
           ))}
         </div>
       </div>
+
+      <section className='grid gap-5'>
+        <div className='rounded-2xl border border-white/10 bg-black/70 p-5 shadow-lg backdrop-blur'>
+          <header className='mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+            <div>
+              <h2 className='text-lg font-semibold text-white'>Daily short notes</h2>
+              <p className='text-sm text-white/60'>Capture a quick win or highlight for each day.</p>
+            </div>
+          </header>
+          <form onSubmit={addDailyNote} className='mb-5 grid gap-3 sm:grid-cols-[140px_1fr] sm:items-end'>
+            <label className='flex flex-col gap-2 text-xs uppercase tracking-[0.18em] text-white/50'>
+              Date
+              <input
+                className='rounded-xl border border-white/10 bg-black/60 px-3 py-2 text-white placeholder:text-white/40 focus:border-white/30 focus:outline-none'
+                type='date'
+                value={noteDate}
+                onChange={(event) => setNoteDate(event.target.value)}
+              />
+            </label>
+            <div className='flex flex-col gap-2 sm:flex-row sm:items-end'>
+              <textarea
+                className='min-h-[60px] flex-1 rounded-xl border border-white/10 bg-black/60 px-4 py-3 text-white placeholder:text-white/40 focus:border-white/30 focus:outline-none'
+                placeholder='What did you get done today?'
+                value={noteText}
+                onChange={(event) => setNoteText(event.target.value)}
+              />
+              <button className='tt-button tt-button-primary sm:min-w-[150px]' type='submit'>Add note</button>
+            </div>
+          </form>
+          {notesByDate.length === 0 ? (
+            <p className='text-sm text-white/60'>No notes yet. Add your first highlight above.</p>
+          ) : (
+            <div className='space-y-4'>
+              {notesByDate.map(([dateKey, items]) => (
+                <article key={dateKey} className='rounded-xl border border-white/10 bg-black/60 px-4 py-3 shadow-inner'>
+                  <header className='mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between'>
+                    <h3 className='text-sm font-semibold text-white'>{formatDateHuman(dateKey)}</h3>
+                    <span className='text-xs uppercase tracking-[0.18em] text-white/40'>{dateKey}</span>
+                  </header>
+                  <ul className='space-y-2 text-sm text-white/70'>
+                    {items.map((note) => (
+                      <li key={note.id} className='flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-black/70 px-3 py-2'>
+                        <span className='whitespace-pre-line'>{note.text}</span>
+                        <button
+                          type='button'
+                          className='tt-button tt-button-outline text-xs'
+                          onClick={() => removeDailyNote(note.id)}
+                        >
+                          Delete
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className='grid gap-5 md:grid-cols-[minmax(0,1fr)_220px]'>
+          <div className='rounded-2xl border border-white/10 bg-black/70 p-5 shadow-lg backdrop-blur'>
+            <header className='mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+              <div>
+                <h2 className='text-lg font-semibold text-white'>Project to-do list</h2>
+                <p className='text-sm text-white/60'>Track actionable tasks for this project.</p>
+              </div>
+            </header>
+            <form onSubmit={addTodo} className='mb-4 flex flex-col gap-3 sm:flex-row'>
+              <input
+                className='flex-1 rounded-xl border border-white/10 bg-black/60 px-4 py-3 text-white placeholder:text-white/40 focus:border-white/30 focus:outline-none'
+                placeholder='Add a task (e.g. Review design draft)'
+                value={todoTitle}
+                onChange={(event) => setTodoTitle(event.target.value)}
+              />
+              <button className='tt-button tt-button-primary sm:min-w-[140px]' type='submit'>Add task</button>
+            </form>
+            {todos.length === 0 ? (
+              <p className='text-sm text-white/60'>No tasks yet. Add a to-do item to get started.</p>
+            ) : (
+              <ul className='space-y-3'>
+                {todos.map((task) => (
+                  <li key={task.id} className='flex flex-col gap-2 rounded-xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white/70 sm:flex-row sm:items-center sm:justify-between'>
+                    <label className='flex flex-1 items-start gap-3'>
+                      <input
+                        type='checkbox'
+                        className='mt-1 h-4 w-4 cursor-pointer'
+                        checked={task.done}
+                        onChange={() => toggleTodoItem(task)}
+                      />
+                      <span className={task.done ? 'line-through opacity-70' : ''}>{task.title}</span>
+                    </label>
+                    <div className='flex items-center gap-2'>
+                      <button
+                        type='button'
+                        className='tt-button tt-button-outline text-xs'
+                        onClick={() => toggleTodoItem(task)}
+                      >
+                        {task.done ? 'Mark undone' : 'Mark done'}
+                      </button>
+                      <button
+                        type='button'
+                        className='tt-button tt-button-outline text-xs'
+                        onClick={() => removeTodoItem(task)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <aside className='flex flex-col items-start gap-4 rounded-2xl border border-white/10 bg-black/70 p-5 text-white shadow-lg backdrop-blur'>
+            <div>
+              <p className='text-xs uppercase tracking-[0.18em] text-white/50'>Progress tracker</p>
+              <h3 className='text-3xl font-semibold'>{completedTodos}/{totalTodos || 0}</h3>
+              <p className='text-sm text-white/60'>Tasks completed</p>
+            </div>
+            <div className='flex w-full flex-col gap-2'>
+              <div className='h-3 w-full overflow-hidden rounded-full border border-white/10 bg-white/10'>
+                <div
+                  className='h-full rounded-full bg-emerald-400'
+                  style={{ width: `${trackerPercent}%` }}
+                />
+              </div>
+              <span className='text-sm text-white/60'>{trackerPercent}% done</span>
+            </div>
+            <p className='text-xs text-white/40'>This tracker updates automatically as you check off tasks.</p>
+          </aside>
+        </div>
+      </section>
+
+
     </div>
   );
 };

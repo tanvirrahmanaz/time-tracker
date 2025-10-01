@@ -78,14 +78,22 @@ export async function patchProjectRemote(id, payload) {
 }
 
 // Spend tracker
-export async function listSpend() {
+export async function listSpend(params = {}) {
+  const search = new URLSearchParams();
+  if (params.month) search.set('month', params.month);
+  if (params.mustSpend) search.set('must', String(params.mustSpend));
+  const qs = search.toString();
   try {
-    return await http('/spend');
+    return await http(`/spend${qs ? `?${qs}` : ''}`);
   } catch (e) {
     // If spend route missing, return empty list so UI stays usable
     if (String(e.message || '').includes('/spend')) return [];
     throw e;
   }
+}
+
+export async function listMustSpend(monthKey) {
+  return listSpend({ month: monthKey, mustSpend: true });
 }
 
 export async function createSpend(entry) {

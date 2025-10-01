@@ -1,5 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import Swal from 'sweetalert2';
+import { Bar, Pie } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Tooltip,
+  Legend,
+  Title,
+} from 'chart.js';
 import { createSpend, listSpend, updateSpend, deleteSpend } from '../../services/serverApi';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, Title);
 
 function startOfDay(d = new Date()) {
   const x = new Date(d);
@@ -66,6 +80,20 @@ const entryKinds = [
   { value: 'loan_in', label: 'Loan Taken', hint: 'Money you borrowed' },
 ];
 
+const paymentMethods = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'card', label: 'Card' },
+  { value: 'bkash', label: 'bKash' },
+  { value: 'nagad', label: 'Nagad' },
+  { value: 'bank', label: 'Bank Transfer' },
+  { value: 'other', label: 'Other' },
+];
+
+const paymentLabelByValue = paymentMethods.reduce((acc, item) => {
+  acc[item.value] = item.label;
+  return acc;
+}, {});
+
 const categoryLabel = (entry) => {
   const map = {
     expense: 'Expense',
@@ -92,6 +120,8 @@ function bdInputToIso(value) {
   return new Date(`${value}:00+06:00`).toISOString();
 }
 
+const isPlannedSpend = (entry) => Boolean(entry?.mustSpend) && !entry?.isCleared;
+
 const Spend = () => {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -100,7 +130,8 @@ const Spend = () => {
   const [entryKind, setEntryKind] = useState('expense');
   const [amount, setAmount] = useState('');
   const [place, setPlace] = useState('');
-  const [method, setMethod] = useState('');
+  const [methodOption, setMethodOption] = useState(paymentMethods[0].value);
+  const [methodCustom, setMethodCustom] = useState('');
   const [reason, setReason] = useState('');
   const [loanWith, setLoanWith] = useState('');
   const [autoNow, setAutoNow] = useState(true);
@@ -108,26 +139,10 @@ const Spend = () => {
   const [chartTab, setChartTab] = useState('week');
   const [chartMode, setChartMode] = useState('histogram');
   const [now, setNow] = useState(() => new Date());
-  const [monthlyTodo, setMonthlyTodo] = useState(() => {
-    try {
-      const raw = localStorage.getItem('tt_spend_month_todo');
-      if (!raw) return {};
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return {};
-      const allBoolean = Object.values(parsed).every((val) => typeof val === 'boolean');
-      if (allBoolean) {
-        const current = new Date();
-        const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
-        return { [key]: parsed };
-      }
-      return parsed;
-    } catch {
-      return {};
-    }
-  });
   const [showTodoForm, setShowTodoForm] = useState(false);
   const [todoAmount, setTodoAmount] = useState('');
   const [todoReason, setTodoReason] = useState('');
+  const [todoNote, setTodoNote] = useState('');
   const [todoWhen, setTodoWhen] = useState(() => getBdInputString());
   const [todoError, setTodoError] = useState('');
   const [todoSaving, setTodoSaving] = useState(false);
@@ -137,11 +152,12 @@ const Spend = () => {
   });
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  async function refresh() {
+  async function refresh(monthKey = selectedMonth) {
     setLoading(true);
     setError('');
     try {
-      const data = await listSpend();
+      const params = monthKey ? { month: monthKey } : {};
+      const data = await listSpend(params);
       setEntries(data);
     } catch (e) {
       setError(e.message || 'Failed to load');
@@ -151,8 +167,8 @@ const Spend = () => {
   }
 
   useEffect(() => {
-    refresh();
-  }, []);
+    refresh(selectedMonth);
+  }, [selectedMonth]);
 
   useEffect(() => {
     if (!autoNow) return;
@@ -165,10 +181,6 @@ const Spend = () => {
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    try { localStorage.setItem('tt_spend_month_todo', JSON.stringify(monthlyTodo)); } catch {}
-  }, [monthlyTodo]);
-
   async function onAdd(e) {
     e.preventDefault();
     setError('');
@@ -176,16 +188,23 @@ const Spend = () => {
       setError('Enter a valid amount');
       return;
     }
+    if (methodOption === 'other' && !methodCustom.trim()) {
+      setError('Enter a payment method name');
+      return;
+    }
 
     try {
       const type = entryKind === 'income' || entryKind === 'loan_in' ? 'in' : 'out';
       const targetInput = autoNow ? getBdInputString() : when;
       const atIso = bdInputToIso(targetInput);
+      const resolvedMethod = methodOption === 'other'
+        ? methodCustom.trim()
+        : (paymentLabelByValue[methodOption] || methodCustom.trim());
       const payload = {
         type,
         amount: Number(amount),
         place: place.trim(),
-        method: method.trim(),
+        method: resolvedMethod,
         reason: reason.trim(),
         at: atIso,
         category: entryKind,
@@ -194,12 +213,14 @@ const Spend = () => {
       await createSpend(payload);
       setAmount('');
       setPlace('');
-      setMethod('');
+      setMethodOption(paymentMethods[0].value);
+      setMethodCustom('');
       setReason('');
       setLoanWith('');
       setEntryKind('expense');
       setWhen(getBdInputString());
       refresh();
+      Swal.fire({ icon: 'success', title: 'Expense added', timer: 1500, showConfirmButton: false });
     } catch (err) {
       setError(err.message || 'Failed to add');
     }
@@ -213,8 +234,11 @@ const Spend = () => {
       (acc, e) => {
         const at = e.at ? new Date(e.at) : new Date();
         if (at >= fromDate) {
-          if (e.type === 'out') acc.out += e.amount;
-          else acc.in += e.amount;
+          if (e.type === 'out') {
+            if (!isPlannedSpend(e)) acc.out += e.amount;
+          } else {
+            acc.in += e.amount;
+          }
         }
         return acc;
       },
@@ -247,15 +271,21 @@ const Spend = () => {
         category: raw.category || (raw.type === 'in' ? 'income' : 'expense'),
         loanParty: raw.loanParty || '',
       };
+      if ((e.category === 'loan_out' || e.category === 'loan_in') && e.isCleared) {
+        return;
+      }
+      const includeAmount = !isPlannedSpend(e);
       if (e.type === 'in') totalIn += e.amount;
-      else totalOut += e.amount;
+      else if (includeAmount) totalOut += e.amount;
 
       const catKey = ['expense', 'income', 'loan_out', 'loan_in'].includes(e.category)
         ? e.category
         : (e.type === 'in' ? 'income' : 'expense');
-      categoryTotals[catKey] += e.amount;
+      if (includeAmount || e.type === 'in') {
+        categoryTotals[catKey] += e.amount;
+      }
 
-      if (e.category === 'loan_out') {
+      if (e.category === 'loan_out' && includeAmount) {
         loanGivenTotal += e.amount;
         const key = e.loanParty || 'Unknown';
         if (!givenMap.has(key)) {
@@ -265,7 +295,7 @@ const Spend = () => {
         item.total += e.amount;
         item.entries.push(e);
       }
-      if (e.category === 'loan_in') {
+      if (e.category === 'loan_in' && includeAmount) {
         loanTakenTotal += e.amount;
         const key = e.loanParty || 'Unknown';
         if (!takenMap.has(key)) {
@@ -311,6 +341,7 @@ const Spend = () => {
       entries.forEach((raw) => {
         const at = raw.at ? new Date(raw.at) : new Date();
         if (at < fromDate) return;
+        if (raw.type === 'out' && isPlannedSpend(raw)) return;
         const amount = Number(raw.amount) || 0;
         const cat = ['expense', 'income', 'loan_out', 'loan_in'].includes(raw.category)
           ? raw.category
@@ -328,10 +359,10 @@ const Spend = () => {
 
   const pieView = useMemo(() => {
     const mapping = [
-      { key: 'expense', label: 'Expense', color: 'var(--color-danger-500)' },
-      { key: 'income', label: 'Income', color: 'var(--color-success-500)' },
-      { key: 'loan_out', label: 'Loan Given', color: 'var(--color-warning-500)' },
-      { key: 'loan_in', label: 'Loan Taken', color: 'var(--color-primary-500)' },
+      { key: 'expense', label: 'Expense', color: 'var(--color-danger-500)', chartColor: '#f87171' },
+      { key: 'income', label: 'Income', color: 'var(--color-success-500)', chartColor: '#34d399' },
+      { key: 'loan_out', label: 'Loan Given', color: 'var(--color-warning-500)', chartColor: '#facc15' },
+      { key: 'loan_in', label: 'Loan Taken', color: 'var(--color-primary-500)', chartColor: '#60a5fa' },
     ];
     const source = chartTab === 'week' ? periodSlices.week : periodSlices.month;
     const items = mapping
@@ -339,20 +370,13 @@ const Spend = () => {
       .filter((item) => item.value > 0);
     const total = items.reduce((sum, item) => sum + item.value, 0);
     if (!total) {
-      return { total: 0, items: [], gradient: '' };
+      return { total: 0, items: [] };
     }
-    let cursor = 0;
-    const segments = items.map((item) => {
-      const start = cursor;
-      const percent = item.value / total;
-      cursor += percent;
-      const end = cursor;
-      return { ...item, start, end, percent };
-    });
-    const gradient = segments
-      .map((seg) => `${seg.color} ${Math.round(seg.start * 100)}% ${Math.round(seg.end * 100)}%`)
-      .join(', ');
-    return { total, items: segments, gradient };
+    const segments = items.map((item) => ({
+      ...item,
+      percent: item.value / total,
+    }));
+    return { total, items: segments };
   }, [chartTab, periodSlices]);
 
   const grouped = useMemo(() => {
@@ -380,6 +404,98 @@ const Spend = () => {
   }, [entries]);
 
   const activeSeries = chartTab === 'week' ? weekSeries : monthSeries;
+
+  const barData = useMemo(() => {
+    const labels = activeSeries.arr.map((bucket) =>
+      chartTab === 'week'
+        ? bucket.label
+        : formatBdDate(new Date(bucket.date), { day: '2-digit', month: 'short' }),
+    );
+    const data = activeSeries.arr.map((bucket) => Number(bucket.out || 0));
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Expense',
+          data,
+          backgroundColor: 'rgba(248, 113, 113, 0.65)',
+          borderRadius: 6,
+        },
+      ],
+    };
+  }, [activeSeries, chartTab]);
+
+  const barOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (context) => `Expense: ${formatMoney(context.parsed.y || 0)}`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: {
+          color: '#9ca3af',
+          maxRotation: 45,
+          minRotation: 45,
+          font: { size: 10 },
+        },
+      },
+      y: {
+        beginAtZero: true,
+        grid: { color: 'rgba(148, 163, 184, 0.12)' },
+        ticks: {
+          color: '#9ca3af',
+          callback: (value) => `৳${Number(value).toLocaleString()}`,
+        },
+      },
+    },
+  }), []);
+
+  const pieData = useMemo(() => ({
+    labels: pieView.items.map((item) => item.label),
+    datasets: [
+      {
+        data: pieView.items.map((item) => item.value),
+        backgroundColor: pieView.items.map((item) => item.chartColor),
+        borderWidth: 1,
+      },
+    ],
+  }), [pieView]);
+
+  const pieOptions = useMemo(() => ({
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { color: '#9ca3af' },
+      },
+      tooltip: {
+        callbacks: {
+          label: (context) => `${context.label}: ${formatMoney(context.parsed)}`,
+        },
+      },
+    },
+  }), []);
+
+  const dailyBreakdown = useMemo(() => {
+    return activeSeries.arr
+      .map((bucket) => ({
+        key: bucket.key,
+        date: new Date(bucket.date),
+        amount: Number(bucket.out || 0),
+      }))
+      .filter((item) => chartTab === 'week' || item.amount > 0)
+      .map((item) => ({
+        ...item,
+        label: formatBdDate(item.date, { weekday: 'short', day: 'numeric', month: 'short' }),
+      }));
+  }, [activeSeries, chartTab]);
 
   const monthOptions = useMemo(() => {
     const set = new Set();
@@ -415,44 +531,45 @@ const Spend = () => {
     });
   }, [entries, selectedMonth]);
 
-  const todoMap = monthlyTodo[selectedMonth] || {};
+  const monthlyMustSpends = useMemo(
+    () => monthlyExpenses.filter((entry) => entry.mustSpend),
+    [monthlyExpenses],
+  );
 
-  useEffect(() => {
-    if (!monthlyExpenses.length) return;
-    setMonthlyTodo((prev) => {
-      const next = { ...prev };
-      const monthKey = selectedMonth;
-      const monthState = { ...(next[monthKey] || {}) };
-      let changed = false;
-      monthlyExpenses.forEach((entry) => {
-        const key = entry._id || entry.id;
-        if (!key) return;
-        const value = !!entry.isCleared;
-        if (!(key in monthState) || monthState[key] !== value) {
-          monthState[key] = value;
-          changed = true;
-        }
-      });
-      if (!changed) return prev;
-      next[monthKey] = monthState;
-      return next;
+  const outstandingMustSpends = useMemo(
+    () => monthlyMustSpends.filter((entry) => !entry.isCleared),
+    [monthlyMustSpends],
+  );
+
+  const outstandingMustTotal = useMemo(
+    () => outstandingMustSpends.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0),
+    [outstandingMustSpends],
+  );
+
+  const orderedMustSpends = useMemo(() => {
+    return [...monthlyMustSpends].sort((a, b) => {
+      const aDate = new Date(a.dueAt || a.at || 0).getTime();
+      const bDate = new Date(b.dueAt || b.at || 0).getTime();
+      if (Number.isNaN(aDate) && Number.isNaN(bDate)) return 0;
+      if (Number.isNaN(aDate)) return 1;
+      if (Number.isNaN(bDate)) return -1;
+      return aDate - bDate;
     });
-  }, [monthlyExpenses, selectedMonth]);
+  }, [monthlyMustSpends]);
 
   const toggleTodo = async (entry) => {
     const key = entry._id || entry.id;
     if (!key) return;
-    const nextValue = !todoMap[key];
-    setMonthlyTodo((prev) => {
-      const next = { ...prev };
-      const monthState = { ...(next[selectedMonth] || {}) };
-      monthState[key] = nextValue;
-      next[selectedMonth] = monthState;
-      return next;
-    });
+    const nextValue = !entry.isCleared;
     try {
       await updateSpend(entry.id || entry._id, { isCleared: nextValue });
       refresh();
+      Swal.fire({
+        icon: 'success',
+        title: nextValue ? 'Marked as done' : 'Back to pending',
+        timer: 1200,
+        showConfirmButton: false,
+      });
     } catch (e) {
       console.warn('Failed to update spend', e);
     }
@@ -464,14 +581,58 @@ const Spend = () => {
     if (!confirm('Remove this expense from the month?')) return;
     try {
       await deleteSpend(entry.id || entry._id);
-      setMonthlyTodo((prev) => {
-        const next = { ...prev };
-        const monthState = { ...(next[selectedMonth] || {}) };
-        delete monthState[key];
-        next[selectedMonth] = monthState;
-        return next;
-      });
       refresh();
+      Swal.fire({ icon: 'success', title: 'Removed', timer: 1200, showConfirmButton: false });
+    } catch (e) {
+      console.warn('Failed to delete spend', e);
+      setError(e.message || 'Failed to delete');
+    }
+  };
+
+  const settleLoanGroup = async (loan) => {
+    const entriesToClear = Array.isArray(loan?.entries) ? loan.entries : [];
+    if (!entriesToClear.length) return;
+    const confirmation = await Swal.fire({
+      icon: 'warning',
+      title: 'Mark loan as completed?',
+      text: 'This will move the loan to completed history.',
+      showCancelButton: true,
+      confirmButtonText: 'Mark completed',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#15803d',
+    });
+    if (!confirmation.isConfirmed) return;
+    try {
+      await Promise.all(entriesToClear.map((entry) => {
+        const id = entry.id || entry._id;
+        if (!id) return Promise.resolve();
+        return updateSpend(id, { isCleared: true });
+      }));
+      refresh();
+      Swal.fire({ icon: 'success', title: 'Loan marked completed', timer: 1600, showConfirmButton: false });
+    } catch (err) {
+      console.warn('Failed to settle loan', err);
+      setError(err.message || 'Failed to mark loan completed');
+    }
+  };
+
+  const deleteHistoryEntry = async (entry) => {
+    const key = entry._id || entry.id;
+    if (!key) return;
+    const keep = await Swal.fire({
+      icon: 'warning',
+      title: 'Delete this expense?',
+      text: 'This action cannot be undone.',
+      showCancelButton: true,
+      confirmButtonText: 'Delete',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#dc2626',
+    });
+    if (!keep.isConfirmed) return;
+    try {
+      await deleteSpend(entry.id || entry._id);
+      refresh();
+      Swal.fire({ icon: 'success', title: 'Expense deleted', timer: 1400, showConfirmButton: false });
     } catch (e) {
       console.warn('Failed to delete spend', e);
       setError(e.message || 'Failed to delete');
@@ -486,58 +647,103 @@ const Spend = () => {
       return;
     }
     if (!todoReason.trim()) {
-      setTodoError('Add a short note for the expense');
+      setTodoError('Add a title for the must spend');
       return;
     }
     if (selectedMonth !== currentMonthKey) {
-      setTodoError('Switch to the current month to add new expenses');
+      setTodoError('Switch to the current month to add must spends');
+      return;
+    }
+    if (todoWhen && todoWhen.slice(0, 7) !== currentMonthKey) {
+      setTodoError('Pick a date inside the current month');
       return;
     }
     try {
       setTodoSaving(true);
+      const dueIso = bdInputToIso(todoWhen || getBdInputString());
       await createSpend({
         type: 'out',
         amount: Number(todoAmount),
         place: '',
         method: '',
         reason: todoReason.trim(),
-        at: bdInputToIso(todoWhen),
+        at: dueIso,
+        dueAt: dueIso,
         category: 'expense',
         loanParty: '',
+        mustSpend: true,
+        note: todoNote.trim(),
       });
       setTodoAmount('');
       setTodoReason('');
+       setTodoNote('');
       setTodoWhen(getBdInputString());
       setShowTodoForm(false);
       refresh();
+      Swal.fire({ icon: 'success', title: 'Must spend saved', timer: 1500, showConfirmButton: false });
     } catch (err) {
-      setTodoError(err.message || 'Failed to add expense');
+      setTodoError(err.message || 'Failed to save must spend');
     } finally {
       setTodoSaving(false);
     }
   };
 
+  // Compute this month total expense only
+  const currentMonthStart = useMemo(() => startOfMonth(now), [now]);
+  const todayStart = useMemo(() => startOfDay(now), [now]);
+
+  const thisMonthTotal = useMemo(() => {
+    return entries.reduce((sum, e) => {
+      const at = e.at ? new Date(e.at) : new Date();
+      if (e.type === 'out' && at >= currentMonthStart) {
+        if (isPlannedSpend(e)) return sum;
+        return sum + (Number(e.amount) || 0);
+      }
+      return sum;
+    }, 0);
+  }, [entries, currentMonthStart]);
+
+  const todayTotal = useMemo(() => {
+    const tomorrow = new Date(todayStart);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return entries.reduce((sum, e) => {
+      const at = e.at ? new Date(e.at) : new Date();
+      if (e.type === 'out' && at >= todayStart && at < tomorrow) {
+        if (isPlannedSpend(e)) return sum;
+        return sum + (Number(e.amount) || 0);
+      }
+      return sum;
+    }, 0);
+  }, [entries, todayStart]);
+
   return (
-    <div className='container mx-auto px-3 py-6 max-w-5xl'>
+    <div className='container mx-auto px-3 py-6 max-w-3xl'>
       <div className='space-y-6'>
         <section className='space-y-4'>
           <h1 className='text-2xl font-semibold'>Spend Tracker</h1>
-          <article className='card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-            <div>
-              <div className='text-sm opacity-75'>Cash on hand</div>
-              <div className='text-3xl font-semibold tracking-tight'>{formatMoney(summary.balance)}</div>
+          <article className='card space-y-4 p-4 sm:p-5'>
+            <div className='grid gap-4 sm:grid-cols-2'>
+              <div>
+                <div className='text-sm opacity-75'>This month's expense</div>
+                <div className='text-3xl font-semibold tracking-tight text-danger-400'>{formatMoney(thisMonthTotal)}</div>
+              </div>
+              <div>
+                <div className='text-sm opacity-75'>Today's expense</div>
+                <div className='text-3xl font-semibold tracking-tight text-danger-400'>{formatMoney(todayTotal)}</div>
+                <div className='mt-1 text-xs uppercase tracking-[0.18em] text-neutral-400'>{formatBdDate(now)}</div>
+              </div>
             </div>
-            <div className='flex flex-col items-start gap-1 text-sm text-neutral-400 sm:items-end'>
-              <span>{formatBdDate(now, { weekday: 'long' })}</span>
+            <div className='flex flex-col items-start gap-1 text-sm text-neutral-400 sm:flex-row sm:items-center sm:justify-between'>
+              <span>{formatBdDate(now, { month: 'long', year: 'numeric' })}</span>
               <span className='font-mono text-base text-neutral-300'>{formatBdTime(now)}</span>
             </div>
           </article>
           <details className='card p-4 sm:p-5'>
-            <summary className='nav-link cursor-pointer text-base font-semibold'>View details</summary>
+            <summary className='nav-link cursor-pointer text-base font-semibold'>More</summary>
             <div className='mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
               <div className='rounded-lg border border-neutral-200/50 bg-white/80 p-3 text-sm shadow-sm sm:p-4 dark:border-neutral-800/60 dark:bg-neutral-900/50'>
-                <div className='text-neutral-500 dark:text-neutral-400'>Total assets</div>
-                <div className='mt-1 text-xl font-semibold'>{formatMoney(summary.netWorth)}</div>
+                <div className='text-neutral-500 dark:text-neutral-400'>Cash on hand</div>
+                <div className='mt-1 text-xl font-semibold'>{formatMoney(summary.balance)}</div>
               </div>
               <div className='rounded-lg border border-neutral-200/50 bg-white/80 p-3 text-sm shadow-sm sm:p-4 dark:border-neutral-800/60 dark:bg-neutral-900/50'>
                 <div className='text-neutral-500 dark:text-neutral-400'>Total income</div>
@@ -617,12 +823,25 @@ const Spend = () => {
             <div className='grid gap-3 sm:grid-cols-2'>
               <label className='flex flex-col gap-1'>
                 <span className='label'>Method</span>
-                <input
+                <select
                   className='input'
-                  placeholder='Cash, card, bKash'
-                  value={method}
-                  onChange={(evt) => setMethod(evt.target.value)}
-                />
+                  value={methodOption}
+                  onChange={(event) => setMethodOption(event.target.value)}
+                >
+                  {paymentMethods.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {methodOption === 'other' && (
+                  <input
+                    className='input mt-2'
+                    placeholder='Enter method name'
+                    value={methodCustom}
+                    onChange={(event) => setMethodCustom(event.target.value)}
+                  />
+                )}
               </label>
               <label className='flex flex-col gap-1'>
                 <span className='label'>Notes</span>
@@ -674,93 +893,126 @@ const Spend = () => {
           </form>
         </section>
 
-        {monthlyExpenses.length > 0 && (
-          <section className='card space-y-4 p-4 sm:p-6'>
-            <header className='flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between'>
-              <div>
-                <h2 className='text-lg font-semibold'>This Month&apos;s Expenses</h2>
-                <p className='text-sm text-neutral-400'>Checklist for {formatBdDate(now, { month: 'long', year: 'numeric' })} outgoing payments.</p>
-              </div>
-              <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Total: {monthlyExpenses.length}</span>
-            </header>
-            <div className='flex flex-wrap items-center justify-between gap-3'>
-              <button className='tt-button tt-button-outline' onClick={() => setShowTodoForm((v) => !v)}>
-                {showTodoForm ? 'Close' : 'Add monthly expense'}
-              </button>
-              <span className='text-xs text-neutral-400'>{Object.values(monthlyTodo).filter(Boolean).length} cleared</span>
+        <section className='card space-y-4 p-4 sm:p-6'>
+          <header className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+            <div>
+              <h2 className='text-lg font-semibold'>Must spend planner</h2>
+              <p className='text-sm text-neutral-400'>Plan and tick off the essential spends for {formatBdDate(now, { month: 'long', year: 'numeric' })}.</p>
             </div>
-            {showTodoForm && (
-              <form className='rounded-lg border border-neutral-200/50 bg-white/80 p-3 text-sm shadow-sm dark:border-neutral-800/60 dark:bg-neutral-900/40' onSubmit={onAddTodoExpense}>
-                <div className='grid gap-3 sm:grid-cols-3'>
-                  <label className='flex flex-col gap-1'>
-                    <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Amount</span>
-                    <input
-                      className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
-                      type='number'
-                      min='0'
-                      step='0.01'
-                      value={todoAmount}
-                      onChange={(e) => setTodoAmount(e.target.value)}
-                    />
-                  </label>
-                  <label className='flex flex-col gap-1 sm:col-span-2'>
-                    <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Note</span>
-                    <input
-                      className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
-                      value={todoReason}
-                      onChange={(e) => setTodoReason(e.target.value)}
-                      placeholder='e.g., Internet bill, Tuition'
-                    />
-                  </label>
-                </div>
-                <div className='mt-3 flex flex-wrap items-end gap-3'>
-                  <label className='flex flex-col gap-1'>
-                    <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Date</span>
-                    <input
-                      className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
-                      type='datetime-local'
-                      value={todoWhen}
-                      onChange={(e) => setTodoWhen(e.target.value)}
-                    />
-                  </label>
-                  <button className='tt-button tt-button-primary' type='submit' disabled={todoSaving}>
-                    {todoSaving ? 'Saving…' : 'Save expense'}
-                  </button>
-                </div>
-                {todoError && <p className='mt-2 text-sm text-danger-400'>{todoError}</p>}
-              </form>
-            )}
+            <div className='text-right text-sm text-neutral-400'>
+              <div>Outstanding: <span className='font-mono text-danger-400'>{formatMoney(outstandingMustTotal)}</span></div>
+              <div className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Cleared {monthlyMustSpends.length - outstandingMustSpends.length} / {monthlyMustSpends.length}</div>
+            </div>
+          </header>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <button className='tt-button tt-button-outline' onClick={() => setShowTodoForm((v) => !v)}>
+              {showTodoForm ? 'Close' : 'Add must spend'}
+            </button>
+            <span className='text-xs text-neutral-400'>Remaining {outstandingMustSpends.length} item{outstandingMustSpends.length === 1 ? '' : 's'}</span>
+          </div>
+          {showTodoForm && (
+            <form className='rounded-lg border border-neutral-200/50 bg-white/80 p-3 text-sm shadow-sm dark:border-neutral-800/60 dark:bg-neutral-900/40' onSubmit={onAddTodoExpense}>
+              <div className='grid gap-3 sm:grid-cols-3'>
+                <label className='flex flex-col gap-1'>
+                  <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Amount</span>
+                  <input
+                    className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+                    type='number'
+                    min='0'
+                    step='0.01'
+                    value={todoAmount}
+                    onChange={(e) => setTodoAmount(e.target.value)}
+                  />
+                </label>
+                <label className='flex flex-col gap-1 sm:col-span-2'>
+                  <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Title</span>
+                  <input
+                    className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+                    value={todoReason}
+                    onChange={(e) => setTodoReason(e.target.value)}
+                    placeholder='e.g., Rent, Tuition fee, Electricity'
+                  />
+                </label>
+                <label className='flex flex-col gap-1 sm:col-span-3'>
+                  <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Reminder note (optional)</span>
+                  <textarea
+                    className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+                    rows={2}
+                    value={todoNote}
+                    onChange={(e) => setTodoNote(e.target.value)}
+                    placeholder='Add a quick reminder or checklist'
+                  />
+                </label>
+              </div>
+              <div className='mt-3 flex flex-wrap items-end gap-3'>
+                <label className='flex flex-col gap-1'>
+                  <span className='text-xs uppercase tracking-[0.18em] text-neutral-500'>Due date</span>
+                  <input
+                    className='rounded border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+                    type='datetime-local'
+                    value={todoWhen}
+                    onChange={(e) => setTodoWhen(e.target.value)}
+                  />
+                </label>
+                <button className='tt-button tt-button-primary' type='submit' disabled={todoSaving}>
+                  {todoSaving ? 'Saving…' : 'Save must spend'}
+                </button>
+              </div>
+              {todoError && <p className='mt-2 text-sm text-danger-400'>{todoError}</p>}
+            </form>
+          )}
+          {orderedMustSpends.length === 0 ? (
+            <p className='text-sm text-neutral-400'>No must spends yet. Add your first one above.</p>
+          ) : (
             <ul className='space-y-2'>
-              {monthlyExpenses.map((entry) => {
+              {orderedMustSpends.map((entry) => {
                 const key = entry._id || entry.id;
-                const checked = monthlyTodo[key] || entry.isCleared || false;
+                const checked = Boolean(entry.isCleared);
+                const dueDate = entry.dueAt ? new Date(entry.dueAt) : (entry.at ? new Date(entry.at) : null);
+                const overdue = dueDate && !checked && dueDate < now;
                 return (
-                  <li key={key} className='flex items-start gap-3 rounded-lg border border-neutral-200/40 bg-white/80 px-3 py-2 text-sm text-neutral-700 dark:border-neutral-800/60 dark:bg-neutral-900/40 dark:text-neutral-200'>
-                    <input
-                      type='checkbox'
-                      className='mt-1 h-4 w-4 cursor-pointer'
-                      checked={checked}
-                      onChange={() => toggleTodo(entry)}
-                    />
-                    <div className='flex-1'>
-                      <p className='font-medium'>{entry.reason || entry.place || 'Expense'}</p>
-                      <p className='text-xs text-neutral-500 dark:text-neutral-400'>
-                        {formatMoney(entry.amount)} • {formatBdDate(new Date(entry.at || Date.now()))}
-                      </p>
+                  <li key={key} className='flex flex-col gap-2 rounded-lg border border-neutral-200/40 bg-white/80 px-3 py-2 text-sm text-neutral-700 dark:border-neutral-800/60 dark:bg-neutral-900/40 dark:text-neutral-200 sm:flex-row sm:items-center sm:justify-between'>
+                    <label className='flex flex-1 cursor-pointer items-start gap-3'>
+                      <input
+                        type='checkbox'
+                        className='mt-1 h-4 w-4 cursor-pointer'
+                        checked={checked}
+                        onChange={() => toggleTodo(entry)}
+                      />
+                      <div className='space-y-1'>
+                        <div className='flex flex-wrap items-center justify-between gap-2'>
+                          <span className='font-semibold'>{entry.reason || 'Must spend'}</span>
+                          <span className='font-mono text-base'>{formatMoney(entry.amount)}</span>
+                        </div>
+                        <div className='text-xs text-neutral-500 dark:text-neutral-400'>
+                          {dueDate ? `Due ${formatBdDate(dueDate, { day: 'numeric', month: 'short' })} • ${formatBdTime(dueDate)}` : 'No due date set'}
+                          {overdue && <span className='ml-2 font-medium text-danger-500'>Overdue</span>}
+                        </div>
+                        {entry.note && <div className='text-xs text-neutral-500 dark:text-neutral-400'>Reminder: {entry.note}</div>}
+                      </div>
+                    </label>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <button
+                        type='button'
+                        className='tt-button tt-button-outline text-xs'
+                        onClick={() => toggleTodo(entry)}
+                      >
+                        {checked ? 'Mark pending' : 'Mark done'}
+                      </button>
+                      <button
+                        type='button'
+                        className='tt-button tt-button-outline text-xs'
+                        onClick={() => removeMonthlyExpense(entry)}
+                      >
+                        Remove
+                      </button>
                     </div>
-                    <button
-                      type='button'
-                      className='tt-button tt-button-outline text-xs'
-                      onClick={() => removeMonthlyExpense(entry)}
-                    >
-                      Remove
-                    </button>
                   </li>
                 );
               })}
             </ul>
-          </section>
-        )}
+          )}
+        </section>
 
         <details className='card space-y-4 p-4 sm:p-6'>
           <summary className='nav-link cursor-pointer text-base font-semibold'>Loan tracker</summary>
@@ -780,8 +1032,15 @@ const Spend = () => {
                       <span className='font-mono'>{formatMoney(loan.total)}</span>
                     </div>
                     <div className='text-xs text-neutral-400'>
-                      {loan.entries.length} entr{loan.entries.length === 1 ? 'y' : 'ies'} • Last: {formatBdDate(new Date(loan.entries[0].at))}
+                      {loan.entries.length} entr{loan.entries.length === 1 ? 'y' : 'ies'} • Last: {loan.entries[0] && loan.entries[0].at ? formatBdDate(new Date(loan.entries[0].at)) : 'N/A'}
                     </div>
+                    <button
+                      type='button'
+                      className='mt-2 tt-button tt-button-outline text-xs'
+                      onClick={() => settleLoanGroup(loan)}
+                    >
+                      Mark completed
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -801,8 +1060,15 @@ const Spend = () => {
                       <span className='font-mono'>{formatMoney(loan.total)}</span>
                     </div>
                     <div className='text-xs text-neutral-400'>
-                      {loan.entries.length} entr{loan.entries.length === 1 ? 'y' : 'ies'} • Last: {formatBdDate(new Date(loan.entries[0].at))}
+                      {loan.entries.length} entr{loan.entries.length === 1 ? 'y' : 'ies'} • Last: {loan.entries[0] && loan.entries[0].at ? formatBdDate(new Date(loan.entries[0].at)) : 'N/A'}
                     </div>
+                    <button
+                      type='button'
+                      className='mt-2 tt-button tt-button-outline text-xs'
+                      onClick={() => settleLoanGroup(loan)}
+                    >
+                      Mark completed
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -866,67 +1132,75 @@ const Spend = () => {
             </div>
           </div>
 
-          {chartMode === 'histogram' ? (
-            <div className='card p-4'>
-              <div className='mb-3 text-sm text-neutral-400'>Daily spend trend ({chartTab === 'week' ? 'last 7 days' : 'this month'})</div>
-              <div className='grid grid-cols-7 gap-2 md:grid-cols-14' style={{ minHeight: 140 }}>
-                {activeSeries.arr.map((bucket) => {
-                  const height = Math.round((bucket.out / activeSeries.max) * 120);
-                  return (
-                    <div key={bucket.key} className='flex flex-col items-center justify-end gap-1'>
-                      <div className='w-full' style={{ height: 120 }}>
-                        <div
-                          className='rounded'
-                          style={{
-                            height,
-                            background: 'linear-gradient(180deg, var(--color-accent-400), var(--color-primary-500))',
-                          }}
-                          title={`${bucket.label}: ${formatMoney(bucket.out)}`}
-                        />
-                      </div>
-                      <div className='text-[10px] text-neutral-500'>
-                        {chartTab === 'week' ? bucket.label : new Date(bucket.date).getDate()}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className='card p-4'>
-              {pieView.total > 0 ? (
-                <div className='flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:justify-center'>
-                  <div
-                    className='relative h-48 w-48 rounded-full border border-neutral-800/60'
-                    style={{ background: `conic-gradient(${pieView.gradient})` }}
-                  >
-                    <div className='absolute inset-10 flex flex-col items-center justify-center rounded-full bg-neutral-950/80 text-center text-sm text-neutral-300'>
-                      <span className='uppercase tracking-wider text-[10px] text-neutral-500'>Total</span>
-                      <span className='font-mono text-base'>{formatMoney(pieView.total)}</span>
-                    </div>
-                  </div>
-                  <ul className='w-full max-w-xs space-y-2 text-sm'>
-                    {pieView.items.map((item) => (
-                      <li key={item.key} className='flex items-center gap-3 rounded border border-neutral-800/40 px-3 py-2'>
-                        <span className='inline-block h-3 w-3 rounded-full' style={{ background: item.color }} />
-                        <span className='flex-1'>{item.label}</span>
-                        <span className='font-mono'>{formatMoney(item.value)}</span>
-                        <span className='text-xs text-neutral-400'>{Math.round(item.percent * 100)}%</span>
-                      </li>
-                    ))}
-                  </ul>
+          <div className='card space-y-4 p-4'>
+            {chartMode === 'histogram' ? (
+              <>
+                <div className='text-sm text-neutral-400'>Daily spend trend ({chartTab === 'week' ? 'last 7 days' : 'this month'})</div>
+                <div className='h-64 w-full'>
+                  <Bar data={barData} options={barOptions} />
                 </div>
-              ) : (
-                <p className='text-sm text-neutral-400'>No data for the selected period yet.</p>
-              )}
+              </>
+            ) : (
+              <>
+                <div className='text-sm text-neutral-400'>Spending mix ({chartTab === 'week' ? 'this week' : 'this month'})</div>
+                {pieView.total > 0 ? (
+                  <div className='flex flex-col items-center gap-6 sm:flex-row sm:items-start sm:justify-evenly'>
+                    <div className='h-64 w-full max-w-xs'>
+                      <Pie data={pieData} options={pieOptions} />
+                    </div>
+                    <ul className='w-full max-w-xs space-y-2 text-sm'>
+                      {pieView.items.map((item) => (
+                        <li key={item.key} className='flex items-center gap-3 rounded border border-neutral-800/40 px-3 py-2'>
+                          <span className='inline-block h-3 w-3 rounded-full' style={{ background: item.chartColor }} />
+                          <span className='flex-1'>{item.label}</span>
+                          <span className='font-mono'>{formatMoney(item.value)}</span>
+                          <span className='text-xs text-neutral-400'>{Math.round(item.percent * 100)}%</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className='text-sm text-neutral-400'>No data for the selected period yet.</p>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className='card p-4'>
+            <h3 className='text-sm font-semibold text-neutral-200'>Daily breakdown</h3>
+            <p className='text-xs uppercase tracking-[0.18em] text-neutral-500'>
+              {chartTab === 'week' ? 'Last 7 days' : 'This month'}
+            </p>
+            <div className='mt-3 max-h-60 overflow-auto rounded border border-neutral-800/40'>
+              <table className='w-full text-left text-sm text-neutral-200'>
+                <thead className='bg-neutral-900/60 text-xs uppercase tracking-[0.12em] text-neutral-500'>
+                  <tr>
+                    <th className='px-3 py-2'>Date</th>
+                    <th className='px-3 py-2 text-right'>Expense</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyBreakdown.length === 0 && (
+                    <tr>
+                      <td className='px-3 py-3 text-sm text-neutral-400' colSpan={2}>No expense recorded for this period.</td>
+                    </tr>
+                  )}
+                  {dailyBreakdown.map((item) => (
+                    <tr key={item.key} className='border-t border-neutral-800/40'>
+                      <td className='px-3 py-2'>{item.label}</td>
+                      <td className='px-3 py-2 text-right font-mono'>{formatMoney(item.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
         </section>
 
-        <section className='card space-y-4 p-4 sm:p-6'>
+        <details className='card space-y-4 p-4 sm:p-6'>
+          <summary className='nav-link cursor-pointer text-base font-semibold'>Expense history</summary>
           <header className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
             <div>
-              <h2 className='text-lg font-semibold'>Expense history</h2>
               <p className='text-sm text-neutral-400'>Latest spends stay at the bottom as you wanted.</p>
             </div>
           </header>
@@ -961,14 +1235,23 @@ const Spend = () => {
                           {entry.loanParty ? ` • Loan with ${entry.loanParty}` : ''}
                         </div>
                       </div>
-                      <div className='text-xs text-neutral-500'>{formatBdTime(new Date(entry.at))}</div>
+                      <div className='flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-3'>
+                        <span className='text-xs text-neutral-500'>{formatBdTime(new Date(entry.at))}</span>
+                        <button
+                          type='button'
+                          className='tt-button tt-button-outline text-xs'
+                          onClick={() => deleteHistoryEntry(entry)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
               </article>
             ))}
           </div>
-        </section>
+        </details>
       </div>
     </div>
   );

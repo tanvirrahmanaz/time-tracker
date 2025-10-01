@@ -48,6 +48,7 @@ import {
 function normalizeRemoteProject(doc) {
   if (!doc) return null;
   const id = doc.id || doc._id || doc.remoteId;
+  const owner = (doc.owner || getApiUser() || '').toLowerCase();
   return {
     id: String(id || crypto.randomUUID()),
     remoteId: id ? String(id) : null,
@@ -56,6 +57,8 @@ function normalizeRemoteProject(doc) {
     createdAt: doc.createdAt || new Date().toISOString(),
     totalMs: doc.totalMs || 0,
     sessions: Array.isArray(doc.sessions) ? doc.sessions : [],
+    owner,
+    todos: Array.isArray(doc.todos) ? doc.todos : [],
   };
 }
 
@@ -64,9 +67,15 @@ export async function syncProjectsFromServer() {
   try {
     const remote = await apiGetProjects();
     if (!Array.isArray(remote)) return load();
+    const owner = (getApiUser() || '').toLowerCase();
     const normalized = remote
       .map(normalizeRemoteProject)
       .filter(Boolean)
+      .filter((project) => {
+        if (!owner) return true;
+        if (!project.owner) return true;
+        return project.owner === owner;
+      })
       .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     save(normalized);
     return normalized;
@@ -94,7 +103,17 @@ export async function addProject({ name, description = '' }) {
   const current = load();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const project = { id, name, description, createdAt: now, totalMs: 0, sessions: [], remoteId: null };
+  const project = {
+    id,
+    name,
+    description,
+    createdAt: now,
+    totalMs: 0,
+    sessions: [],
+    remoteId: null,
+    owner: (owner || '').toLowerCase(),
+    todos: [],
+  };
   current.unshift(project);
   save(current);
   return project;
@@ -110,7 +129,12 @@ export function updateProject(updated) {
   const remoteId = merged.remoteId || merged.id;
   if (remoteId && getApiUser()) {
     try {
-      patchProjectRemote(remoteId, { name: merged.name, description: merged.description })
+      const payload = {
+        name: merged.name,
+        description: merged.description,
+      };
+      if (merged.todos !== undefined) payload.todos = merged.todos;
+      patchProjectRemote(remoteId, payload)
         .then(() => syncProjectsFromServer())
         .catch(() => {});
     } catch {}

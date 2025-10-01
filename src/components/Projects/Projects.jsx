@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import Swal from 'sweetalert2';
 import { Link } from 'react-router-dom';
 import { addProject, getProjects, formatDuration, deleteProject, syncProjectsFromServer } from '../../services/storage';
 import { useAuth } from '../../contexts/AuthContext.jsx';
@@ -38,6 +39,7 @@ const Projects = () => {
     setName('');
     setDescription('');
     setTick(t => t + 1);
+    Swal.fire({ icon: 'success', title: 'Project created', timer: 1500, showConfirmButton: false });
     if (user) {
       syncProjectsFromServer().then((list) => setProjects(list)).catch(() => {});
     }
@@ -53,24 +55,34 @@ const Projects = () => {
     }
   };
 
+  const ownerEmail = (user?.email || '').toLowerCase();
+
   const dedupedProjects = useMemo(() => {
+    const relevant = projects.filter((project) => {
+      if (!project) return false;
+      if (!ownerEmail) return true;
+      const projectOwner = (project.owner || '').toLowerCase();
+      if (!projectOwner) return true; // legacy entries without owner metadata default to current user
+      return projectOwner === ownerEmail;
+    });
+
     const map = new Map();
-    for (const project of projects) {
-      if (!project) continue;
+    for (const project of relevant) {
       const key = project.remoteId || project.id;
       if (!key) continue;
       if (!map.has(key)) {
         map.set(key, {
           ...project,
           id: key,
-          remoteId: key,
+          remoteId: project.remoteId || key,
           totalMs: project.totalMs || 0,
           sessions: Array.isArray(project.sessions) ? project.sessions : [],
+          owner: project.owner || ownerEmail,
         });
       }
     }
     return Array.from(map.values());
-  }, [projects]);
+  }, [projects, ownerEmail]);
 
   return (
     <div className='mx-auto flex w-full max-w-5xl flex-col gap-8 rounded-3xl bg-black px-4 pb-16 pt-8 text-white shadow-2xl sm:px-6'>
