@@ -94,6 +94,52 @@ const paymentLabelByValue = paymentMethods.reduce((acc, item) => {
   return acc;
 }, {});
 
+const spendCategoryOptions = [
+  { value: 'food', label: 'Food' },
+  { value: 'rickshaw', label: 'Rickshaw' },
+  { value: 'transport', label: 'Transport' },
+  { value: 'other', label: 'Other' },
+];
+
+const spendCategoryLabelByValue = spendCategoryOptions.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {});
+
+const INSIGHT_DAY_COUNT = 5;
+const FUND_SOURCE_STORAGE_KEY = 'tt_fund_sources';
+
+function loadStoredFundSources() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(FUND_SOURCE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item) => item && item.toLowerCase() !== 'self' && item.toLowerCase() !== 'other');
+  } catch (err) {
+    console.warn('Failed to load stored fund sources', err);
+    return [];
+  }
+}
+
+function persistStoredFundSources(list) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(FUND_SOURCE_STORAGE_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.warn('Failed to persist fund sources', err);
+  }
+}
+
+function formatFundSourceLabel(value) {
+  if (!value || value === 'self') return 'My money';
+  if (value.toLowerCase() === 'mother') return "Mom's money";
+  return value;
+}
+
 const categoryLabel = (entry) => {
   const map = {
     expense: 'Expense',
@@ -129,13 +175,17 @@ const Spend = () => {
 
   const [entryKind, setEntryKind] = useState('expense');
   const [amount, setAmount] = useState('');
-  const [place, setPlace] = useState('');
+  const [placeOption, setPlaceOption] = useState(spendCategoryOptions[0].value);
+  const [placeCustom, setPlaceCustom] = useState('');
   const [methodOption, setMethodOption] = useState(paymentMethods[0].value);
   const [methodCustom, setMethodCustom] = useState('');
   const [reason, setReason] = useState('');
   const [loanWith, setLoanWith] = useState('');
   const [autoNow, setAutoNow] = useState(true);
   const [when, setWhen] = useState(() => getBdInputString());
+  const [userFundSources, setUserFundSources] = useState(() => loadStoredFundSources());
+  const [fundSourceOption, setFundSourceOption] = useState('self');
+  const [fundSourceCustom, setFundSourceCustom] = useState('');
   const [chartTab, setChartTab] = useState('week');
   const [chartMode, setChartMode] = useState('histogram');
   const [now, setNow] = useState(() => new Date());
@@ -151,6 +201,107 @@ const Spend = () => {
     return `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
   });
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [insightDayIndex, setInsightDayIndex] = useState(0);
+
+  const fundSourceOptionsList = useMemo(() => {
+    const seen = new Set();
+    const customOptions = [];
+    const register = (name) => {
+      if (!name || typeof name !== 'string') return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const lower = trimmed.toLowerCase();
+      if (lower === 'self' || lower === 'other') return;
+      if (seen.has(lower)) return;
+      seen.add(lower);
+      customOptions.push({
+        value: `custom:${encodeURIComponent(trimmed)}`,
+        label: trimmed,
+      });
+    };
+    userFundSources.forEach(register);
+    entries.forEach((entry) => register(entry?.fundSource));
+    return [
+      { value: 'self', label: 'My money' },
+      ...customOptions,
+      { value: 'other', label: 'Other (add new)' },
+    ];
+  }, [userFundSources, entries]);
+
+  const insightDays = useMemo(() => {
+    const todayStart = startOfDay(now);
+    return Array.from({ length: INSIGHT_DAY_COUNT }, (_, idx) => {
+      const date = new Date(todayStart);
+      date.setDate(date.getDate() - idx);
+      return {
+        key: date.toISOString(),
+        date,
+        label: formatBdDate(date, { weekday: 'short', day: 'numeric', month: 'short' }),
+        shortLabel: idx === 0 ? 'Today' : formatBdDate(date, { day: 'numeric' }),
+      };
+    });
+  }, [now]);
+
+  const selectedInsightDay = insightDays[Math.min(insightDayIndex, insightDays.length - 1)] || insightDays[0];
+
+  const insightDaySpan = useMemo(() => {
+    if (!selectedInsightDay) return null;
+    const start = startOfDay(selectedInsightDay.date);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  }, [selectedInsightDay]);
+
+  const insightCategoryBreakdown = useMemo(() => {
+    if (!insightDaySpan) return { total: 0, categories: [] };
+    const map = new Map();
+    for (const entry of entries) {
+      if (entry.type !== 'out') continue;
+      if (isPlannedSpend(entry)) continue;
+      const at = entry.at ? new Date(entry.at) : new Date();
+      if (at < insightDaySpan.start || at >= insightDaySpan.end) continue;
+      const key = (entry.place && String(entry.place).trim()) || 'Uncategorized';
+      const amount = Number(entry.amount) || 0;
+      if (!map.has(key)) map.set(key, 0);
+      map.set(key, map.get(key) + amount);
+    }
+    const categories = Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    const total = categories.reduce((sum, item) => sum + item.value, 0);
+    return { total, categories };
+  }, [entries, insightDaySpan]);
+
+  const insightCategoryPieData = useMemo(() => {
+    if (!insightCategoryBreakdown.categories.length) return null;
+    const palette = ['#f87171', '#facc15', '#60a5fa', '#34d399', '#a855f7', '#fb923c', '#f472b6', '#22d3ee'];
+    const colors = insightCategoryBreakdown.categories.map((_, idx) => palette[idx % palette.length]);
+    return {
+      labels: insightCategoryBreakdown.categories.map((item) => item.name),
+      datasets: [
+        {
+          data: insightCategoryBreakdown.categories.map((item) => item.value),
+          backgroundColor: colors,
+          borderWidth: 1,
+        },
+      ],
+    };
+  }, [insightCategoryBreakdown]);
+
+  const insightCategoryPieOptions = useMemo(() => ({
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { color: '#9ca3af' },
+      },
+      tooltip: {
+        callbacks: {
+          label: (context) => `${context.label}: ${formatMoney(context.parsed)}`,
+        },
+      },
+    },
+  }), []);
 
   async function refresh(monthKey = selectedMonth) {
     setLoading(true);
@@ -181,6 +332,14 @@ const Spend = () => {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    persistStoredFundSources(userFundSources);
+  }, [userFundSources]);
+
+  useEffect(() => {
+    setInsightDayIndex(0);
+  }, [selectedMonth]);
+
   async function onAdd(e) {
     e.preventDefault();
     setError('');
@@ -191,6 +350,28 @@ const Spend = () => {
     if (methodOption === 'other' && !methodCustom.trim()) {
       setError('Enter a payment method name');
       return;
+    }
+    const resolvedPlace = placeOption === 'other'
+      ? placeCustom.trim()
+      : (spendCategoryLabelByValue[placeOption] || '');
+    if (placeOption === 'other' && !resolvedPlace) {
+      setError('Enter a category for the spend');
+      return;
+    }
+    let resolvedFundSource = 'self';
+    if (fundSourceOption === 'self') {
+      resolvedFundSource = 'self';
+    } else if (fundSourceOption === 'other') {
+      const customSource = fundSourceCustom.trim();
+      if (!customSource) {
+        setError('Enter a money source name');
+        return;
+      }
+      resolvedFundSource = customSource;
+    } else if (fundSourceOption.startsWith('custom:')) {
+      resolvedFundSource = decodeURIComponent(fundSourceOption.slice(7));
+    } else {
+      resolvedFundSource = fundSourceOption;
     }
 
     try {
@@ -203,22 +384,33 @@ const Spend = () => {
       const payload = {
         type,
         amount: Number(amount),
-        place: place.trim(),
+        place: resolvedPlace,
         method: resolvedMethod,
         reason: reason.trim(),
         at: atIso,
         category: entryKind,
         loanParty: entryKind.includes('loan') ? loanWith.trim() : '',
+        fundSource: resolvedFundSource,
       };
       await createSpend(payload);
+      if (fundSourceOption === 'other') {
+        setUserFundSources((prev) => {
+          const exists = prev.some((item) => item.toLowerCase() === resolvedFundSource.toLowerCase());
+          if (exists) return prev;
+          return [...prev, resolvedFundSource];
+        });
+      }
       setAmount('');
-      setPlace('');
+      setPlaceOption(spendCategoryOptions[0].value);
+      setPlaceCustom('');
       setMethodOption(paymentMethods[0].value);
       setMethodCustom('');
       setReason('');
       setLoanWith('');
       setEntryKind('expense');
       setWhen(getBdInputString());
+      setFundSourceOption('self');
+      setFundSourceCustom('');
       refresh();
       Swal.fire({ icon: 'success', title: 'Expense added', timer: 1500, showConfirmButton: false });
     } catch (err) {
@@ -810,17 +1002,60 @@ const Spend = () => {
                 />
               </label>
               <label className='flex flex-col gap-1'>
-                <span className='label'>Where</span>
-                <input
+                <span className='label'>Spend category</span>
+                <select
                   className='input'
-                  placeholder='Shop, client, location'
-                  value={place}
-                  onChange={(evt) => setPlace(evt.target.value)}
-                />
+                  value={placeOption}
+                  onChange={(evt) => setPlaceOption(evt.target.value)}
+                >
+                  {spendCategoryOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
 
+            {placeOption === 'other' && (
+              <label className='flex flex-col gap-1'>
+                <span className='label'>Custom category</span>
+                <input
+                  className='input'
+                  placeholder='e.g. Medicine, tuition fee'
+                  value={placeCustom}
+                  onChange={(evt) => setPlaceCustom(evt.target.value)}
+                />
+              </label>
+            )}
+
             <div className='grid gap-3 sm:grid-cols-2'>
+              <label className='flex flex-col gap-1'>
+                <span className='label'>Money source</span>
+                <select
+                  className='input'
+                  value={fundSourceOption}
+                  onChange={(evt) => {
+                    const value = evt.target.value;
+                    setFundSourceOption(value);
+                    if (value !== 'other') setFundSourceCustom('');
+                  }}
+                >
+                  {fundSourceOptionsList.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {fundSourceOption === 'other' && (
+                  <input
+                    className='input mt-2'
+                    placeholder='Enter source name'
+                    value={fundSourceCustom}
+                    onChange={(event) => setFundSourceCustom(event.target.value)}
+                  />
+                )}
+              </label>
               <label className='flex flex-col gap-1'>
                 <span className='label'>Method</span>
                 <select
@@ -843,16 +1078,17 @@ const Spend = () => {
                   />
                 )}
               </label>
-              <label className='flex flex-col gap-1'>
-                <span className='label'>Notes</span>
-                <input
-                  className='input'
-                  placeholder='Groceries, electricity bill, etc.'
-                  value={reason}
-                  onChange={(evt) => setReason(evt.target.value)}
-                />
-              </label>
             </div>
+
+            <label className='flex flex-col gap-1'>
+              <span className='label'>Notes</span>
+              <input
+                className='input'
+                placeholder='Groceries, electricity bill, etc.'
+                value={reason}
+                onChange={(evt) => setReason(evt.target.value)}
+              />
+            </label>
 
             {entryKind.includes('loan') && (
               <label className='flex flex-col gap-1'>
@@ -1166,6 +1402,56 @@ const Spend = () => {
             )}
           </div>
 
+          <div className='card space-y-3 p-4'>
+            <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+              <div>
+                <div className='text-sm font-semibold text-neutral-200'>Daily category breakdown</div>
+                <p className='text-xs uppercase tracking-[0.18em] text-neutral-500'>{selectedInsightDay?.label}</p>
+                {insightCategoryBreakdown.total > 0 && (
+                  <p className='text-xs text-neutral-400'>Total expense: {formatMoney(insightCategoryBreakdown.total)}</p>
+                )}
+              </div>
+              <label className='flex flex-col text-xs text-neutral-400 sm:text-right'>
+                <span className='hidden text-neutral-500 sm:inline'>Select day</span>
+                <select
+                  className='input mt-0 sm:mt-1'
+                  value={String(insightDayIndex)}
+                  onChange={(event) => setInsightDayIndex(Number(event.target.value))}
+                >
+                  {insightDays.map((day, idx) => (
+                    <option key={day.key} value={idx}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {insightCategoryPieData ? (
+              <div className='flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:justify-evenly'>
+                <div className='h-64 w-full max-w-xs'>
+                  <Pie data={insightCategoryPieData} options={insightCategoryPieOptions} />
+                </div>
+                <ul className='w-full max-w-xs space-y-2 text-sm'>
+                  {insightCategoryBreakdown.categories.map((item, idx) => (
+                    <li key={item.name} className='flex items-center gap-3 rounded border border-neutral-800/40 px-3 py-2'>
+                      <span
+                        className='inline-block h-3 w-3 rounded-full'
+                        style={{ background: insightCategoryPieData.datasets[0].backgroundColor[idx] }}
+                      />
+                      <span className='flex-1'>{item.name}</span>
+                      <span className='font-mono'>{formatMoney(item.value)}</span>
+                      <span className='text-xs text-neutral-400'>
+                        {Math.round((item.value / insightCategoryBreakdown.total) * 100)}%
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className='text-sm text-neutral-400'>No expense recorded for this day.</p>
+            )}
+          </div>
+
           <div className='card p-4'>
             <h3 className='text-sm font-semibold text-neutral-200'>Daily breakdown</h3>
             <p className='text-xs uppercase tracking-[0.18em] text-neutral-500'>
@@ -1229,10 +1515,13 @@ const Spend = () => {
                           <span className='font-mono text-lg'>{formatMoney(entry.amount)}</span>
                         </div>
                         <div className='text-xs text-neutral-400'>
-                          {(entry.place || '-')}
-                          {entry.method ? ` • ${entry.method}` : ''}
-                          {entry.reason ? ` • ${entry.reason}` : ''}
-                          {entry.loanParty ? ` • Loan with ${entry.loanParty}` : ''}
+                          {[
+                            entry.place || '-',
+                            entry.method || '',
+                            entry.reason || '',
+                            entry.loanParty ? `Loan with ${entry.loanParty}` : '',
+                            entry.fundSource ? `Paid with ${formatFundSourceLabel(entry.fundSource)}` : '',
+                          ].filter(Boolean).join(' • ')}
                         </div>
                       </div>
                       <div className='flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-3'>
