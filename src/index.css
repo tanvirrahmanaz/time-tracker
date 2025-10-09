@@ -35,6 +35,41 @@
     @apply text-neutral-300;
   }
 
+  /* Improve readability in light theme */
+  :root,[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  [data-theme="light"] .text-neutral-400,
+  [data-theme="light"] .text-neutral-300,
+  [data-theme="light"] .text-neutral-200 {
+    color: theme('colors.neutral.600') !important;
+  }
+
+  [data-theme="light"] .text-neutral-500 {
+    color: theme('colors.neutral.700') !important;
+  }
+
+  [data-theme="light"] .text-neutral-100,
+  [data-theme="light"] .text-neutral-50 {
+    color: theme('colors.neutral.800') !important;
+  }
+
+  [data-theme="light"] .border-neutral-800\/40,
+  [data-theme="light"] .border-neutral-800\/60 {
+    border-color: theme('colors.neutral.300') !important;
+  }
+
+  [data-theme="light"] .bg-neutral-900\/40,
+  [data-theme="light"] .bg-neutral-900\/50,
+  [data-theme="light"] .bg-neutral-900\/60 {
+    background-color: rgba(226, 232, 240, 0.8) !important;
+  }
+
+  [data-theme="light"] .bg-neutral-800\/40 {
+    background-color: rgba(226, 232, 240, 0.6) !important;
+  }
+
   :fullscreen {
     @apply bg-black;
   }
@@ -283,6 +318,14 @@
 
   .tt-button-outline.active {
     @apply bg-white/20;
+  }
+
+  .tt-input {
+    @apply w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-neutral-900 placeholder:text-neutral-500;
+  }
+
+  [data-theme="dark"] .tt-input {
+    @apply border-white/25 bg-black/60 text-white placeholder:text-white/50;
   }
 
   .sr-only {

@@ -107,3 +107,85 @@ export async function updateSpend(id, payload) {
 export async function deleteSpend(id) {
   return http(`/spend/${id}`, { method: 'DELETE' });
 }
+
+// Daily logs
+export async function getDailyLog(dateKey) {
+  const search = new URLSearchParams();
+  if (dateKey) search.set('date', dateKey);
+  const qs = search.toString();
+  return http(`/daily${qs ? `?${qs}` : ''}`);
+}
+
+export async function listDailyLogs(params = {}) {
+  const search = new URLSearchParams();
+  if (params.month) search.set('month', params.month);
+  if (params.limit) search.set('limit', String(params.limit));
+  const qs = search.toString();
+  return http(`/daily${qs ? `?${qs}` : ''}`);
+}
+
+export async function createDailyLog(payload) {
+  return http('/daily', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function updateDailyLog(id, payload) {
+  return http(`/daily/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+}
+
+export async function deleteDailyLog(id) {
+  return http(`/daily/${id}`, { method: 'DELETE' });
+}
+
+// Question bank
+export async function listQuestionTopics() {
+  return http('/question-topics');
+}
+
+export async function createQuestionTopic(payload) {
+  return http('/question-topics', { method: 'POST', body: JSON.stringify(payload || {}) });
+}
+
+export async function updateQuestionTopic(id, payload) {
+  return http(`/question-topics/${id}`, { method: 'PATCH', body: JSON.stringify(payload || {}) });
+}
+
+export async function deleteQuestionTopic(id, { reassign = false } = {}) {
+  const search = reassign ? '?reassign=true' : '';
+  return http(`/question-topics/${id}${search}`, { method: 'DELETE' });
+}
+
+export async function listQuestions(params = {}) {
+  const search = new URLSearchParams();
+  if (params.topicId) search.set('topicId', params.topicId);
+  if (params.difficulty) search.set('difficulty', params.difficulty);
+  if (params.favorite !== undefined) search.set('favorite', String(params.favorite));
+  if (params.tag) search.set('tag', params.tag);
+  if (params.search) search.set('search', params.search);
+  if (params.limit) search.set('limit', String(params.limit));
+  const qs = search.toString();
+  return http(`/questions${qs ? `?${qs}` : ''}`);
+}
+
+export async function createQuestion(payload) {
+  return http('/questions', { method: 'POST', body: JSON.stringify(payload || {}) });
+}
+
+export async function updateQuestion(id, payload) {
+  return http(`/questions/${id}`, { method: 'PATCH', body: JSON.stringify(payload || {}) });
+}
+
+export async function deleteQuestion(id) {
+  return http(`/questions/${id}`, { method: 'DELETE' });
+}
+
+export async function reviewQuestion(id, payload = {}) {
+  return http(`/questions/${id}/review`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function listQuestionReminders(params = {}) {
+  const search = new URLSearchParams();
+  if (params.withinDays) search.set('withinDays', String(params.withinDays));
+  if (params.limit) search.set('limit', String(params.limit));
+  const qs = search.toString();
+  return http(`/questions/reminders${qs ? `?${qs}` : ''}`);
+}

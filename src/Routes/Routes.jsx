@@ -8,6 +8,8 @@ import Timer from "../components/Clock/Timer";
 import Projects from "../components/Projects/Projects";
 import ProjectDetail from "../components/Projects/ProjectDetail";
 import Spend from "../components/Spend/Spend";
+import Daily from "../components/Daily/Daily";
+import QuestionHub from "../components/Questions/QuestionHub";
 import ProtectedRoute from "../components/Auth/ProtectedRoute";
 
 const router = createBrowserRouter([
@@ -48,6 +50,22 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute>
                         <Spend />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/questions',
+                element: (
+                    <ProtectedRoute>
+                        <QuestionHub />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/daily',
+                element: (
+                    <ProtectedRoute>
+                        <Daily />
                     </ProtectedRoute>
                 ),
             },
